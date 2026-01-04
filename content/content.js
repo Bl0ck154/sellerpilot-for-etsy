@@ -7,6 +7,8 @@ let lastUrl = location.href;
 let lastBuyerId = null;
 let urlCheckInterval = null;
 let lastParsedHash = "";
+let chatManagerInitialized = false;
+
 
 
 // 1. MAIN LOGIC
@@ -130,6 +132,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         attemptExtraction();
         sendResponse({ status: "Refreshed" });
     }
+
+    // Handle Chat Manager toggle from options page
+    if (request.type === "CHAT_MANAGER_TOGGLE") {
+        toggleChatManager(request.enabled);
+        sendResponse({ status: "Chat Manager toggled" });
+    }
 });
 
 window.addEventListener("message", (event) => {
@@ -137,5 +145,41 @@ window.addEventListener("message", (event) => {
     // Removed old Etsy.Context handling - now using PageParser
 });
 
+// --- CHAT MANAGER INTEGRATION ---
+function toggleChatManager(enabled) {
+    if (enabled && !chatManagerInitialized) {
+        if (window.EtsyChatManager) {
+            window.EtsyChatManager.init();
+            chatManagerInitialized = true;
+            console.log('✅ Chat Manager enabled');
+        }
+    } else if (!enabled && chatManagerInitialized) {
+        if (window.EtsyChatManager) {
+            window.EtsyChatManager.cleanup();
+            chatManagerInitialized = false;
+            console.log('🛑 Chat Manager disabled');
+        }
+    }
+}
+
+// Initialize Chat Manager on load if enabled
+chrome.storage.sync.get(['chatManagerEnabled'], (result) => {
+    const isEnabled = result.chatManagerEnabled !== undefined ? result.chatManagerEnabled : true;
+    console.log('🎨 Chat Manager setting:', isEnabled);
+
+    if (isEnabled) {
+        // Wait for EtsyChatManager to be available
+        const checkAndInit = () => {
+            if (window.EtsyChatManager) {
+                toggleChatManager(true);
+            } else {
+                setTimeout(checkAndInit, 100);
+            }
+        };
+        checkAndInit();
+    }
+});
+
 // --- HELPERS ---
 // Old parsing functions removed - now using PageParser module
+

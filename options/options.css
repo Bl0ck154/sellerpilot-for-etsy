@@ -1,0 +1,202 @@
+/* options.css - Modern Material Design styling */
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    color: #333;
+}
+
+.container {
+    background: white;
+    border-radius: 16px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+    max-width: 600px;
+    width: 100%;
+    overflow: hidden;
+}
+
+header {
+    background: linear-gradient(135deg, #F1641E 0%, #FF8C42 100%);
+    color: white;
+    padding: 32px 24px;
+    text-align: center;
+}
+
+header h1 {
+    font-size: 28px;
+    font-weight: 600;
+    margin-bottom: 8px;
+}
+
+.subtitle {
+    font-size: 14px;
+    opacity: 0.9;
+}
+
+main {
+    padding: 32px 24px;
+}
+
+.settings-section {
+    margin-bottom: 24px;
+}
+
+.setting-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 24px;
+    padding: 20px;
+    background: #f8f9fa;
+    border-radius: 12px;
+    border: 2px solid transparent;
+    transition: all 0.3s ease;
+}
+
+.setting-item:hover {
+    background: #fff;
+    border-color: #F1641E;
+    box-shadow: 0 4px 12px rgba(241, 100, 30, 0.1);
+}
+
+.setting-info {
+    flex: 1;
+}
+
+.setting-info h2 {
+    font-size: 18px;
+    font-weight: 600;
+    margin-bottom: 8px;
+    color: #222;
+}
+
+.description {
+    font-size: 14px;
+    color: #666;
+    line-height: 1.6;
+}
+
+.description small {
+    display: inline-block;
+    margin-top: 6px;
+    color: #888;
+}
+
+.description code {
+    background: #e9ecef;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-family: 'Courier New', monospace;
+}
+
+/* Toggle Switch */
+.toggle-switch {
+    position: relative;
+    display: inline-block;
+    width: 60px;
+    height: 34px;
+    flex-shrink: 0;
+}
+
+.toggle-switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: #ccc;
+    transition: 0.4s;
+    border-radius: 34px;
+}
+
+.slider:before {
+    position: absolute;
+    content: "";
+    height: 26px;
+    width: 26px;
+    left: 4px;
+    bottom: 4px;
+    background-color: white;
+    transition: 0.4s;
+    border-radius: 50%;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+input:checked+.slider {
+    background: linear-gradient(135deg, #F1641E 0%, #FF8C42 100%);
+}
+
+input:checked+.slider:before {
+    transform: translateX(26px);
+}
+
+/* Status Message */
+.status {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 16px 20px;
+    background: #d4edda;
+    color: #155724;
+    border-radius: 8px;
+    border-left: 4px solid #28a745;
+    font-weight: 500;
+    margin-top: 24px;
+    animation: slideIn 0.3s ease;
+}
+
+.status.hidden {
+    display: none;
+}
+
+.status-icon {
+    font-size: 20px;
+}
+
+@keyframes slideIn {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+footer {
+    background: #f8f9fa;
+    padding: 20px 24px;
+    text-align: center;
+    font-size: 13px;
+    color: #666;
+    border-top: 1px solid #e9ecef;
+}
+
+footer strong {
+    color: #F1641E;
+}
+
+footer small {
+    color: #999;
+}

@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="uk">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Налаштування Etsy AI Assistant</title>
+    <link rel="stylesheet" href="options.css">
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <h1>⚙️ Налаштування Etsy AI Assistant</h1>
+            <p class="subtitle">Personalize your Etsy experience</p>
+        </header>
+
+        <main>
+            <section class="settings-section">
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <h2>🎨 Chat Manager</h2>
+                        <p class="description">
+                            Покращений інтерфейс для сторінок повідомлень Etsy з можливістю зміни розмірів панелей.
+                            <br>
+                            <small>Працює на: <code>etsy.com/messages</code></small>
+                        </p>
+                    </div>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="chatManagerToggle" checked>
+                        <span class="slider"></span>
+                    </label>
+                </div>
+            </section>
+
+            <div id="status" class="status hidden">
+                <span class="status-icon">✓</span>
+                <span class="status-text">Налаштування збережено</span>
+            </div>
+        </main>
+
+        <footer>
+            <p>
+                <strong>Etsy AI Assistant</strong> v3.0
+                <br>
+                <small>Made with ❤️ for better Etsy workflow</small>
+            </p>
+        </footer>
+    </div>
+
+    <script src="options.js"></script>
+</body>
+
+</html>
