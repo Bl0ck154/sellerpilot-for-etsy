@@ -1,0 +1,49 @@
+{
+  "manifest_version": 3,
+  "name": "Etsy AI Assistant",
+  "version": "3.0",
+  "description": "AI assistant integrated into Etsy pages",
+  "permissions": [
+    "scripting",
+    "activeTab",
+    "tabs",
+    "storage"
+  ],
+  "host_permissions": [
+    "https://www.etsy.com/*"
+  ],
+  "background": {
+    "service_worker": "background/service_worker.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.etsy.com/*"
+      ],
+      "js": [
+        "content/config.js",
+        "libs/Readability.min.js",
+        "libs/turndown.js",
+        "content/page_parser.js",
+        "content/ai_service.js",
+        "content/content.js",
+        "content/chat_ui.js"
+      ],
+      "css": [
+        "content/chat_ui.css"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "content/chat_ui.css",
+        "content/ui.html"
+      ],
+      "matches": [
+        "https://www.etsy.com/*"
+      ]
+    }
+  ]
+}

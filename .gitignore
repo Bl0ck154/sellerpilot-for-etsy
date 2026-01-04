@@ -1,0 +1,33 @@
+# API Keys and Secrets
+config.secret.json
+*.secret.json
+
+# Backups
+nppBackup/
+*.bak
+
+# Debug files
+debug_*.py
+debug_*.html
+default_chat.html
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+npm-debug.log*
+
+# Extension builds (if any)
+dist/
+build/
+*.zip
