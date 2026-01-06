@@ -2,29 +2,8 @@
 
 class AIService {
     static INSTRUCTIONS = {
-        baseInstruction: `You are an personal assistant of Etsy shop owner.
-You are speaking to the shop owner in the language he uses in his request.
-Use concise answers to the point, without unnecessary formalities, without mentioning where we are and what our store does, because I already know that.
-Our shop services include: AI photo processing combined with manual editing, merging people into photos, animating photos into videos, and creating AI songs (Suno).
-Use context of the page to know what to suggest to me. 
-If we are on a message chat page, propably you should provide several response options for the customer in the chat. 
-These responses must be in the language the customer is using (usually English) and enclose in monospace font.
-Occasionally encourage a purchase or a larger order by promising a discount promo code.
-Do not use character separators between lines.
+        baseInstruction: window.ETSY_AI_BASE_INSTRUCTION,
 
-When you write an answer to a customer of our shop, use the following Communication Style and Tone:
-- Polite, warm, professional, and concise.
-- Start with "Hi / Hello + Name" and thank them for the purchase or inquiry if the dialog just started.
-- Use short paragraphs.
-- Do NOT use multiple line breaks between sentences (keep it compact) in your responses to the customer. 
-- Do NOT use long em-dashes (—); use standard hyphens (-) only.
-- Provide emotional but restrained support for memorial and sensitive orders.
-- Be transparent about AI limitations (likeness is not 100%, difficulty with exact age or clothing).
-- Explain that pricing depends only on the number of people in the final image (extra people in source photos can be removed).
-- Standard turnaround time is about 24 hours (with a disclaimer it may be faster or slightly longer).
-- Ask confirmation questions (number of people, height of people, special features, background, style, color vs B&W, animation).
-- Confirm understanding by paraphrasing.
-- Use phrases like "Order in progress", "Your order is now ready", "I'm here to help", "Looking forward to working on your project".`,
 
         getPageContext(pageContent, metadata) {
             const firstPart = `\n
@@ -40,42 +19,56 @@ ${pageContent.excerpt ? `- Summary: ${pageContent.excerpt}` : ''}
 ${pageContent.markdown ? `\n\nPAGE CONTENT:\n${pageContent.markdown}` : ''}`;
         },
 
-        buildFullInstruction(context) {
+        async buildFullInstruction(context) {
+            // Check for custom instructions in storage
+            let instruction = this.baseInstruction;
+
+            try {
+                const result = await chrome.storage.local.get(['custom_instructions']);
+                if (result.custom_instructions && result.custom_instructions.trim()) {
+                    instruction = result.custom_instructions;
+                    console.log('📝 Using custom instructions from storage');
+                } else {
+                    console.log('📝 Using default base instructions');
+                }
+            } catch (error) {
+                console.warn('Failed to load custom instructions, using default:', error);
+            }
+
             const pageContent = context.page_content || {};
             const metadata = context.metadata || {};
             const pageContext = this.getPageContext(pageContent, metadata);
 
-            return `${this.baseInstruction}${pageContext}`;
+            return `${instruction}${pageContext}`;
         }
     };
 
     /**
      * Builds the conversation history for the API.
-     * @param {string|null} userId - User identifier (optional for now).
+     * @param {string|null} userId - User identifier (use 'global_chat' for global storage).
      * @param {string} currentUserMessage - The text of the new message.
      * @returns {Promise<Array>} Array of message objects formatted for Gemini API.
      */
     async buildConversationHistory(userId, currentUserMessage) {
         const contents = [];
 
-        if (userId) {
-            const key = `history_${userId}`;
-            try {
-                const result = await chrome.storage.local.get([key]);
-                const history = result[key] || [];
+        // Always use global chat storage
+        const key = 'current_chat_messages';
+        try {
+            const result = await chrome.storage.local.get([key]);
+            const history = result[key] || [];
 
-                for (const msg of history) {
-                    const role = msg.type === 'user' ? 'user' : (msg.type === 'ai' ? 'model' : null);
-                    if (role) {
-                        contents.push({
-                            role: role,
-                            parts: [{ text: msg.text }]
-                        });
-                    }
+            for (const msg of history) {
+                const role = msg.type === 'user' ? 'user' : (msg.type === 'ai' ? 'model' : null);
+                if (role) {
+                    contents.push({
+                        role: role,
+                        parts: [{ text: msg.text }]
+                    });
                 }
-            } catch (error) {
-                console.warn('Failed to load history:', error);
             }
+        } catch (error) {
+            console.warn('Failed to load global chat history:', error);
         }
 
         contents.push({
@@ -90,13 +83,87 @@ ${pageContent.markdown ? `\n\nPAGE CONTENT:\n${pageContent.markdown}` : ''}`;
      * Prepares the system instruction and user prompt based on context.
      * @param {Object} context - The current page context.
      * @param {string} userQuery - The user's input.
-     * @returns {Object} { systemInstruction, userPrompt }
+     * @returns {Promise<Object>} { systemInstruction, userPrompt }
      */
-    constructPromptData(context, userQuery) {
+    async constructPromptData(context, userQuery) {
         return {
-            systemInstruction: AIService.INSTRUCTIONS.buildFullInstruction(context),
+            systemInstruction: await AIService.INSTRUCTIONS.buildFullInstruction(context),
             userPrompt: `SHOP OWNER REQUEST:\n${userQuery}`
         };
+    }
+
+    /**
+     * Generates a short chat title based on conversation content.
+     * @param {string} userMessage - The user's first message.
+     * @param {string} aiResponse - The AI's first response.
+     * @param {string} apiKey - Google API Key.
+     * @param {string} modelId - Model ID to use (defaults to fast model).
+     * @returns {Promise<string>} Generated chat title.
+     */
+    async generateChatTitle(userMessage, aiResponse, apiKey, modelId = 'gemini-2.0-flash-exp') {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:generateContent`;
+
+        const prompt = `Проаналізуй цей діалог і придумай коротку назву (3-7 слів), яка відображає суть запиту. Віддай лише текст назви без лапок.
+
+Користувач: ${userMessage}
+AI: ${aiResponse}`;
+
+        const payload = {
+            contents: [{
+                role: 'user',
+                parts: [{ text: prompt }]
+            }]
+        };
+
+        const maxRetries = 1; // Reduced from 3 to avoid excessive API calls during rate limits
+        const retryDelays = [2000]; // Single retry with 2s delay
+
+        for (let attempt = 0; attempt <= maxRetries; attempt++) {
+            try {
+                const response = await fetch(url, {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "x-goog-api-key": apiKey
+                    },
+                    body: JSON.stringify(payload)
+                });
+
+                if (!response.ok) {
+                    const error = new Error(`API Error: ${response.status}`);
+                    error.statusCode = response.status;
+
+                    // Retry only on 429 (rate limit) errors
+                    if (response.status === 429 && attempt < maxRetries) {
+                        const delay = retryDelays[attempt];
+                        console.warn(`⏳ Rate limit (429). Retrying in ${delay}ms...`);
+                        await new Promise(resolve => setTimeout(resolve, delay));
+                        continue; // Retry
+                    }
+
+                    throw error;
+                }
+
+                const data = await response.json();
+                const titleText = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+
+                if (titleText) {
+                    return titleText;
+                }
+
+                // If no title text, throw error to trigger fallback
+                throw new Error('No title text in response');
+            } catch (error) {
+                // If this is the last attempt or not a retryable error, throw to trigger fallback
+                if (attempt === maxRetries || (error.statusCode && error.statusCode !== 429)) {
+                    // Only log error on final attempt to reduce noise
+                    if (attempt === maxRetries) {
+                        console.warn('⚠️ Chat title generation failed after retries, using fallback');
+                    }
+                    throw error; // Caller will handle fallback
+                }
+            }
+        }
     }
 
     /**

@@ -1,29 +1,71 @@
 <!DOCTYPE html>
-<html lang="uk">
+<html lang="en">
 
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Налаштування Etsy AI Assistant</title>
+    <title>Etsy AI Assistant Settings</title>
     <link rel="stylesheet" href="options.css">
 </head>
 
 <body>
     <div class="container">
         <header>
-            <h1>⚙️ Налаштування Etsy AI Assistant</h1>
+            <h1>⚙️ Etsy AI Assistant Settings</h1>
             <p class="subtitle">Personalize your Etsy experience</p>
         </header>
 
         <main>
+            <!-- Google Gemini API Key Section -->
+            <section class="settings-section">
+                <div class="setting-item setting-item-vertical">
+                    <div class="setting-info">
+                        <h2>🔑 Google Gemini API Key</h2>
+                        <p class="description">
+                            Enter your Google Gemini API key to enable AI features.
+                            <br>
+                            <small>Get your API key from <a href="https://aistudio.google.com/app/apikey"
+                                    target="_blank">Google AI Studio</a></small>
+                        </p>
+                    </div>
+                    <div class="input-with-toggle">
+                        <input type="password" id="apiKeyInput" class="input-field" placeholder="Enter your API key...">
+                        <button type="button" id="toggleApiKeyVisibility" class="toggle-visibility-btn"
+                            title="Show/Hide API Key">👁️</button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Custom Instructions Section -->
+            <section class="settings-section">
+                <div class="setting-item setting-item-vertical">
+                    <div class="setting-info">
+                        <h2>📝 Custom AI Instructions</h2>
+                        <p class="description">
+                            View and customize AI behavior instructions. Instructions auto-update when defaults change,
+                            unless you modify them.
+                            <br>
+                            <small>Click "Reset to Default" to restore original instructions and re-enable
+                                auto-updates.</small>
+                        </p>
+                    </div>
+                    <div class="textarea-with-reset">
+                        <textarea id="customInstructions" class="textarea-field" placeholder="Loading instructions..."
+                            rows="12"></textarea>
+                        <button type="button" id="resetInstructions" class="reset-btn">🔄 Reset to Default</button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Chat Manager Toggle Section -->
             <section class="settings-section">
                 <div class="setting-item">
                     <div class="setting-info">
-                        <h2>🎨 Chat Manager</h2>
+                        <h2>🎨 Etsy Chat Style with Resizers</h2>
                         <p class="description">
-                            Покращений інтерфейс для сторінок повідомлень Etsy з можливістю зміни розмірів панелей.
+                            Enhanced interface for Etsy message pages with resizable panels.
                             <br>
-                            <small>Працює на: <code>etsy.com/messages</code></small>
+                            <small>Works on: <code>etsy.com/messages</code></small>
                         </p>
                     </div>
                     <label class="toggle-switch">
@@ -35,19 +77,20 @@
 
             <div id="status" class="status hidden">
                 <span class="status-icon">✓</span>
-                <span class="status-text">Налаштування збережено</span>
+                <span class="status-text">Settings saved</span>
             </div>
         </main>
 
         <footer>
             <p>
-                <strong>Etsy AI Assistant</strong> v3.0
+                <strong>Etsy AI Assistant</strong> v1.0
                 <br>
                 <small>Made with ❤️ for better Etsy workflow</small>
             </p>
         </footer>
     </div>
 
+    <script src="../config/base_instruction.js"></script>
     <script src="options.js"></script>
 </body>
 

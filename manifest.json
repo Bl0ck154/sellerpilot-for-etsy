@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Etsy AI Assistant",
-  "version": "3.0",
+  "version": "1.0",
   "description": "AI assistant integrated into Etsy pages",
   "permissions": [
     "scripting",
@@ -22,6 +22,7 @@
         "https://www.etsy.com/*"
       ],
       "js": [
+        "config/base_instruction.js",
         "content/config.js",
         "libs/Readability.min.js",
         "libs/turndown.js",
@@ -41,7 +42,8 @@
     {
       "resources": [
         "content/chat_ui.css",
-        "content/ui.html"
+        "content/ui.html",
+        "config/base_instruction.js"
       ],
       "matches": [
         "https://www.etsy.com/*"

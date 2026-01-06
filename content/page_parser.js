@@ -86,10 +86,6 @@ function extractPageContent() {
             .replace(/\n+$/, '')          // Видаляємо переноси в кінці
             .trim();
 
-        console.log("🍬 Page Parser: Успішно витягнуто контент");
-        console.log("📄 Заголовок:", document.title);
-        console.log("📊 Ось вам Markdown:", markdown);
-
         return {
             title: document.title || "",
             markdown: cleanedMarkdown,

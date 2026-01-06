@@ -371,6 +371,9 @@ function initChat() {
     };
     let CURRENT_CONTEXT = null;
     let isProcessing = false; // Prevent multiple simultaneous messages
+    let currentChatId = null; // ID for current chat session
+    let currentChatTitle = null; // AI-generated title (will be set after first exchange)
+    let loadedSessionId = null; // ID of loaded session from history (to update instead of duplicate)
 
     const ELEMENTS = {
         statusDot: document.getElementById('connection-status'),
@@ -397,9 +400,11 @@ function initChat() {
     // --- INITIALIZATION ---
     // DOM is already ready, call init functions directly
     (async () => {
+        await handleBrowserRestart(); // Auto-save previous chat if exists
         await loadConfiguration();
         restoreState();
         setupListeners();
+        await loadCurrentChat(); // Load or start fresh chat
 
         // Request context from current page
         chrome.storage.local.get(['current_context'], (result) => {
@@ -589,22 +594,55 @@ function initChat() {
         }
     }
 
-    async function loadHistory(pageUrl) {
-        // Use URL-based history instead of buyer ID
-        const urlHash = simpleHash(pageUrl);
-        const key = `history_${urlHash}`;
-        const result = await safeStorageGet([key]);
-        if (!result) return; // Extension context invalidated
-        const history = result[key] || [];
+    // Handle browser/extension restart: auto-save old chat
+    async function handleBrowserRestart() {
+        const result = await safeStorageGet(['current_chat_messages', 'current_chat_metadata']);
+        if (!result) return;
 
-        if (history.length > 0) {
-            history.forEach(msg => {
+        const messages = result.current_chat_messages || [];
+        const metadata = result.current_chat_metadata || {};
+
+        // If there are messages from previous session, save them to history
+        const realMessages = messages.filter(m => m.type === 'user' || m.type === 'ai');
+        if (realMessages.length > 0) {
+            // Check if this is a loaded session (stored in metadata)
+            if (metadata.loaded_session_id) {
+                console.log('� Chat was loaded from history, updating existing session:', metadata.loaded_session_id);
+                // Set loadedSessionId so it updates instead of creating duplicate
+                loadedSessionId = metadata.loaded_session_id;
+            } else {
+                console.log('📦 Auto-saving new chat to history...');
+                loadedSessionId = null; // Ensure it's treated as new
+            }
+
+            await saveGlobalChatToHistory(messages, metadata);
+
+            // Clear the global chat for fresh start
+            await safeStorageSet({
+                current_chat_messages: [],
+                current_chat_metadata: {}
+            });
+        }
+
+        // Reset loaded session ID after saving
+        loadedSessionId = null;
+    }
+
+    // Load current global chat on initialization
+    async function loadCurrentChat() {
+        const result = await safeStorageGet(['current_chat_messages']);
+        if (!result) return;
+
+        const messages = result.current_chat_messages || [];
+
+        if (messages.length > 0) {
+            messages.forEach(msg => {
                 renderMessage(msg.text, msg.type, msg.timestamp);
             });
         }
     }
 
-    // Simple hash function for URLs
+    // Simple hash function for generating IDs
     function simpleHash(str) {
         let hash = 0;
         for (let i = 0; i < str.length; i++) {
@@ -615,16 +653,16 @@ function initChat() {
         return Math.abs(hash).toString(36);
     }
 
-    async function saveChatToStorage(pageUrl, text, type) {
-        if (!pageUrl) return;
-        const urlHash = simpleHash(pageUrl);
-        const key = `history_${urlHash}`;
+    // Save message to global chat storage
+    async function saveChatToStorage(text, type) {
+        const key = 'current_chat_messages';
 
-        // Use a function to ensure we get fresh data
         try {
-            const result = await safeStorageGet([key]);
-            if (!result) return; // Extension context invalidated
-            const history = result[key] || [];
+            const result = await safeStorageGet([key, 'current_chat_metadata']);
+            if (!result) return;
+
+            const messages = result[key] || [];
+            const metadata = result.current_chat_metadata || {};
 
             const newMsg = {
                 text,
@@ -632,12 +670,22 @@ function initChat() {
                 timestamp: new Date().toISOString()
             };
 
-            history.push(newMsg);
-            if (history.length > 50) history.shift();
+            messages.push(newMsg);
+            if (messages.length > 100) messages.shift(); // Increased limit for global chat
 
-            await safeStorageSet({ [key]: history });
+            // Update metadata
+            const now = new Date().toISOString();
+            if (!metadata.created_at) {
+                metadata.created_at = now;
+            }
+            metadata.updated_at = now;
+
+            await safeStorageSet({
+                [key]: messages,
+                current_chat_metadata: metadata
+            });
         } catch (e) {
-            console.error("Failed to save history:", e);
+            console.error("Failed to save to global chat:", e);
         }
     }
 
@@ -671,20 +719,16 @@ function initChat() {
         // 2. Show User Message
         renderMessage(userMessageText, "user");
 
-        // 3. Save User Msg
-        if (CURRENT_CONTEXT?.page_url) {
-            await saveChatToStorage(CURRENT_CONTEXT.page_url, userMessageText, "user");
-        }
+        // 3. Save User Msg to global chat
+        await saveChatToStorage(userMessageText, "user");
 
         // Show animated loading
         const loadingMsgId = showLoadingDots();
 
         try {
-            // Build conversation history for multi-turn chat
-            const pageUrl = CURRENT_CONTEXT?.page_url;
-            const urlHash = pageUrl ? simpleHash(pageUrl) : null;
-            const conversationHistory = await aiService.buildConversationHistory(urlHash, userMessageText);
-            const { systemInstruction } = aiService.constructPromptData(CURRENT_CONTEXT, userMessageText);
+            // Build conversation history for multi-turn chat from global storage
+            const conversationHistory = await aiService.buildConversationHistory('global_chat', userMessageText);
+            const { systemInstruction } = await aiService.constructPromptData(CURRENT_CONTEXT, userMessageText);
 
             // Call streaming API з callbacks
             await streamAIResponse(modelId, apiKey, conversationHistory, systemInstruction);
@@ -728,9 +772,10 @@ function initChat() {
         const inlineCodes = [];
 
         // 1. Зберігаємо багаторядкові code blocks з кнопкою копіювання
-        html = html.replace(/```([\s\S]*?)```/g, (match, code) => {
+        // Updated regex: ```language (optional) followed by code content
+        html = html.replace(/```(?:\w+)?\s*\n?([\s\S]*?)```/g, (match, code) => {
             const index = codeBlocks.length;
-            const escapedCode = escapeHtml(code);
+            const escapedCode = escapeHtml(code.trim());
             codeBlocks.push(`<pre class="code-block-wrapper"><code>${escapedCode}</code><button class="copy-code-btn" data-code="${escapeHtml(escapedCode)}" title="Copy">📋</button></pre>`);
             return `🔸CODEBLOCK◆${index}◆`;
         });
@@ -794,15 +839,20 @@ function initChat() {
         html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
         html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
 
-        // 4. Bold (non-greedy)
+        // 5. Markdown Links [text](url)
+        html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, text, url) => {
+            return `<a href="${url}" target="_blank" rel="noopener noreferrer">${text}</a>`;
+        });
+
+        // 6. Bold (non-greedy)
         html = html.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
         html = html.replace(/__(.+?)__/g, '<b>$1</b>');
 
-        // 5. Italic (non-greedy, уникаємо конфлікту з bold)
+        // 7. Italic (non-greedy, уникаємо конфлікту з bold)
         html = html.replace(/\*(?!\*)(.+?)\*(?!\*)/g, '<i>$1</i>');
         html = html.replace(/_(?!_)(.+?)_(?!_)/g, '<i>$1</i>');
 
-        // 6. Lists
+        // 8. Lists
         html = html.replace(/^[\-\*] (.+)$/gm, '<li>$1</li>');
 
         // Обгортаємо послідовні <li> в <ul>
@@ -814,15 +864,19 @@ function initChat() {
         html = html.replace(/<\/ul>\s*\n+/g, '</ul>');
         html = html.replace(/<\/li>\s*\n+/g, '</li>');
 
-        // 8. Line breaks (звичайні)
+        // 8. Replace multiple consecutive line breaks with single line break
+        // This prevents double spacing (e.g., \n\n becomes single <br>)
+        html = html.replace(/\n{2,}/g, '\n');
+
+        // 9. Line breaks (звичайні)
         html = html.replace(/\n/g, '<br>');
 
-        // 8. Відновлюємо code blocks
+        // 10. Відновлюємо code blocks
         html = html.replace(/🔸CODEBLOCK◆(\d+)◆/g, (match, index) => {
             return codeBlocks[parseInt(index)];
         });
 
-        // 9. Відновлюємо inline code
+        // 11. Відновлюємо inline code
         html = html.replace(/🔹INLINECODE◆(\d+)◆/g, (match, index) => {
             return inlineCodes[parseInt(index)];
         });
@@ -994,9 +1048,25 @@ function initChat() {
             timestamp.innerText = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
             aiMsgDiv.appendChild(timestamp);
 
-            // Save to storage
-            if (CURRENT_CONTEXT?.page_url) {
-                await saveChatToStorage(CURRENT_CONTEXT.page_url, fullText, "ai");
+            // Save to global chat storage
+            await saveChatToStorage(fullText, "ai");
+
+            // Generate title after first exchange (user message + AI response)
+            // Cache title using first words from AI response (no API call)
+            if (!currentChatTitle) {
+                const result = await safeStorageGet(['current_chat_messages']);
+                if (result) {
+                    const messages = result.current_chat_messages || [];
+                    // Check if this is first exchange (2 messages: 1 user + 1 AI)
+                    const userMessages = messages.filter(m => m.type === 'user');
+                    const aiMessages = messages.filter(m => m.type === 'ai');
+
+                    if (userMessages.length === 1 && aiMessages.length === 1) {
+                        // Use first words from AI response as title
+                        currentChatTitle = createFallbackTitle(aiMessages[0].text);
+                        console.log('✅ Chat title cached:', currentChatTitle);
+                    }
+                }
             }
         };
 
@@ -1030,48 +1100,117 @@ function initChat() {
         return currentSessionId;
     }
 
-    // Save current chat session
-    async function saveCurrentSession() {
-        if (!CURRENT_CONTEXT?.page_url) return;
+    // Create fallback title from AI response
+    function createFallbackTitle(aiResponseText) {
+        if (!aiResponseText) return 'Новий чат';
 
-        const pageUrl = CURRENT_CONTEXT.page_url;
-        const urlHash = simpleHash(pageUrl);
-        const sessionId = getSessionId(pageUrl);
-        const key = `history_${urlHash}`;
+        // Remove markdown formatting and extra whitespace
+        let cleanText = aiResponseText
+            .replace(/```[\s\S]*?```/g, '') // Remove code blocks
+            .replace(/\*\*(.+?)\*\*/g, '$1') // Remove bold
+            .replace(/\*(.+?)\*/g, '$1')     // Remove italic
+            .replace(/`(.+?)`/g, '$1')       // Remove inline code
+            .replace(/[#\-\*]/g, '')         // Remove markdown symbols
+            .replace(/\s+/g, ' ')            // Normalize whitespace
+            .trim();
 
+        // Take first 6-7 words or max 50 characters
+        const words = cleanText.split(' ');
+        let title = words.slice(0, 7).join(' ');
+
+        if (title.length > 50) {
+            title = title.substring(0, 50);
+        }
+
+        // Add ellipsis if truncated
+        if (words.length > 7 || cleanText.length > title.length) {
+            title += '...';
+        }
+
+        return title || 'Новий чат';
+    }
+
+    // Save global chat to history index
+    async function saveGlobalChatToHistory(messages, metadata) {
         try {
-            // Get current messages
-            const result = await safeStorageGet([key]);
-            if (!result) return; // Extension context invalidated
-            const history = result[key] || [];
+            // Don't save if this is a loaded session (it's already in history)
+            if (loadedSessionId) {
+                console.log('📝 Updating existing session in history:', loadedSessionId);
+                // Update the existing session instead of creating a new one
+                const indexKey = 'sessions_index_all';
+                const indexResult = await safeStorageGet([indexKey]);
+                if (!indexResult) return;
 
-            if (history.length === 0) return; // Nothing to save
+                const sessionsIndex = indexResult[indexKey] || [];
+                const existingSessionIndex = sessionsIndex.findIndex(s => s.id === loadedSessionId);
 
-            // Generate session name from page title + time
-            const pageTitle = CURRENT_CONTEXT.page_content?.title || CURRENT_CONTEXT.metadata?.title || 'Etsy Page';
-            const timestamp = new Date().toLocaleString('uk-UA', {
-                month: 'short',
-                day: 'numeric',
-                hour: '2-digit',
-                minute: '2-digit'
-            });
-            const sessionName = `${pageTitle} - ${timestamp}`;
+                if (existingSessionIndex !== -1) {
+                    // Update existing session
+                    sessionsIndex[existingSessionIndex].messages = messages;
+                    sessionsIndex[existingSessionIndex].updated_at = metadata.updated_at || new Date().toISOString();
+                    sessionsIndex[existingSessionIndex].messageCount = messages.length;
 
-            // Get sessions index
+                    await safeStorageSet({ [indexKey]: sessionsIndex });
+                    console.log('✅ Session updated in history');
+                }
+                return; // Don't create a new session
+            }
+
             const indexKey = 'sessions_index_all';
             const indexResult = await safeStorageGet([indexKey]);
-            if (!indexResult) return; // Extension context invalidated
+            if (!indexResult) return;
+
             const sessionsIndex = indexResult[indexKey] || [];
 
-            // Add session to index
+            // Generate session ID
+            const sessionId = `session_${Date.now()}_${simpleHash(JSON.stringify(messages.slice(0, 2)))}`;
+
+            // CHECK FOR DUPLICATES: Look for sessions with similar content
+            const messagesHash = simpleHash(JSON.stringify(messages));
+            const isDuplicate = sessionsIndex.some(session => {
+                const existingHash = simpleHash(JSON.stringify(session.messages));
+                return existingHash === messagesHash;
+            });
+
+            if (isDuplicate) {
+                console.log('⚠️ Duplicate chat detected, skipping save to history');
+                return; // Don't save duplicate
+            }
+
+            // Generate title if not already available
+            let sessionTitle = currentChatTitle;
+
+            // CRITICAL: For loaded sessions, use the original title from metadata
+            if (metadata.session_title) {
+                sessionTitle = metadata.session_title;
+                console.log('📝 Using original session title:', sessionTitle);
+            } else if (!sessionTitle) {
+                // Check if we have first user-AI exchange to generate title
+                const userMessages = messages.filter(m => m.type === 'user');
+                const aiMessages = messages.filter(m => m.type === 'ai');
+
+                if (userMessages.length > 0 && aiMessages.length > 0) {
+                    // Use first words from AI response as title (no API call)
+                    sessionTitle = createFallbackTitle(aiMessages[0].text);
+                    // Only cache if this is the first time we're generating a title for this chat
+                    // (currentChatTitle should be null for new chats)
+                    if (!currentChatTitle) {
+                        currentChatTitle = sessionTitle;
+                    }
+                    console.log('📝 Chat title from response:', sessionTitle);
+                } else {
+                    // No messages to generate title from, use first words or generic fallback
+                    sessionTitle = aiMessages.length > 0 ? createFallbackTitle(aiMessages[0].text) : 'Новий чат';
+                }
+            }
+
             const sessionData = {
                 id: sessionId,
-                name: sessionName,
-                pageTitle: pageTitle,
-                pageUrl: pageUrl,
-                timestamp: new Date().toISOString(),
-                messageCount: history.length,
-                messages: history
+                title: sessionTitle,
+                created_at: metadata.created_at || new Date().toISOString(),
+                updated_at: metadata.updated_at || new Date().toISOString(),
+                messageCount: messages.length,
+                messages: messages
             };
 
             sessionsIndex.push(sessionData);
@@ -1079,19 +1218,82 @@ function initChat() {
             // Save index
             await safeStorageSet({ [indexKey]: sessionsIndex });
 
-            console.log('Session saved:', sessionName);
+            console.log('✅ Session saved to history:', sessionTitle);
         } catch (e) {
-            console.error('Failed to save session:', e);
+            console.error('Failed to save to history:', e);
         }
+    }
+
+    // Save current global chat session to history
+    async function saveCurrentSession() {
+        try {
+            // Get current global chat messages
+            const result = await safeStorageGet(['current_chat_messages', 'current_chat_metadata']);
+            if (!result) return;
+
+            const messages = result.current_chat_messages || [];
+            const metadata = result.current_chat_metadata || {};
+
+            // Only save if there are actual messages
+            const realMessages = messages.filter(m => m.type === 'user' || m.type === 'ai');
+            if (realMessages.length === 0) return;
+
+            await saveGlobalChatToHistory(messages, metadata);
+        } catch (e) {
+            console.error('Failed to save current session:', e);
+        }
+    }
+
+    // Helper function to get date group for a chat
+    function getDateGroup(timestamp) {
+        const now = new Date();
+        const chatDate = new Date(timestamp);
+
+        // Reset time to midnight for accurate day comparison
+        const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const chatDayStart = new Date(chatDate.getFullYear(), chatDate.getMonth(), chatDate.getDate());
+
+        const daysDiff = Math.floor((todayStart - chatDayStart) / (1000 * 60 * 60 * 24));
+
+        if (daysDiff === 0) return 'today';
+        if (daysDiff === 1) return 'yesterday';
+        if (daysDiff <= 7) return 'week';
+        if (daysDiff <= 30) return 'month';
+        return 'older';
+    }
+
+    // Group chats by date periods
+    function groupChatsByDate(chats) {
+        const groups = {
+            today: [],
+            yesterday: [],
+            week: [],
+            month: [],
+            older: []
+        };
+
+        chats.forEach(chat => {
+            const group = getDateGroup(chat.updated_at || chat.timestamp);
+            groups[group].push(chat);
+        });
+
+        return groups;
+    }
+
+    // Get Ukrainian label for group
+    function getGroupLabel(groupKey) {
+        const labels = {
+            today: 'Сьогодні',
+            yesterday: 'Вчора',
+            week: 'Попередні 7 днів',
+            month: 'Попередні 30 днів',
+            older: 'Давніше'
+        };
+        return labels[groupKey] || groupKey;
     }
 
     // Open history modal
     async function openHistory() {
-        if (!CURRENT_CONTEXT?.page_url) {
-            addMessage("⚠️ No page detected. Open an Etsy page first.", "system");
-            return;
-        }
-
         const indexKey = 'sessions_index_all';
         const indexResult = await safeStorageGet([indexKey]);
         if (!indexResult) return; // Extension context invalidated
@@ -1103,49 +1305,66 @@ function initChat() {
         if (sessionsIndex.length === 0) {
             ELEMENTS.historyList.innerHTML = '<div class="history-empty">No chat history yet.<br>Start a conversation to create history.</div>';
         } else {
-            // Sort by timestamp (newest first)
-            sessionsIndex.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+            // Sort by updated_at (newest first)
+            sessionsIndex.sort((a, b) => new Date(b.updated_at || b.timestamp) - new Date(a.updated_at || a.timestamp));
 
-            sessionsIndex.forEach(session => {
-                const item = document.createElement('div');
-                item.className = 'history-item';
+            // Group chats by date
+            const groupedChats = groupChatsByDate(sessionsIndex);
 
-                const titleRow = document.createElement('div');
-                titleRow.className = 'history-item-title-row';
+            // Render each group
+            const groupOrder = ['today', 'yesterday', 'week', 'month', 'older'];
+            groupOrder.forEach(groupKey => {
+                const chatsInGroup = groupedChats[groupKey];
+                if (chatsInGroup.length === 0) return; // Skip empty groups
 
-                const title = document.createElement('div');
-                title.className = 'history-item-title';
-                title.textContent = session.name;
+                // Add group header
+                const groupHeader = document.createElement('div');
+                groupHeader.className = 'history-group-header';
+                groupHeader.textContent = getGroupLabel(groupKey);
+                ELEMENTS.historyList.appendChild(groupHeader);
 
-                const deleteBtn = document.createElement('button');
-                deleteBtn.className = 'history-item-delete';
-                deleteBtn.innerHTML = '✕';
-                deleteBtn.title = 'Delete this chat';
-                deleteBtn.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    deleteHistorySession(session.id);
+                // Add chats in this group
+                chatsInGroup.forEach(session => {
+                    const item = document.createElement('div');
+                    item.className = 'history-item';
+
+                    const titleRow = document.createElement('div');
+                    titleRow.className = 'history-item-title-row';
+
+                    const title = document.createElement('div');
+                    title.className = 'history-item-title';
+                    title.textContent = session.title || session.name || 'Untitled Chat';
+
+                    const deleteBtn = document.createElement('button');
+                    deleteBtn.className = 'history-item-delete';
+                    deleteBtn.innerHTML = '✕';
+                    deleteBtn.title = 'Delete this chat';
+                    deleteBtn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        deleteHistorySession(session.id);
+                    });
+
+                    titleRow.appendChild(title);
+                    titleRow.appendChild(deleteBtn);
+
+                    const meta = document.createElement('div');
+                    meta.className = 'history-item-meta';
+                    const date = new Date(session.updated_at || session.timestamp);
+                    meta.innerHTML = `
+                    <span>${date.toLocaleDateString('uk-UA')} ${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                    <span>${session.messageCount} messages</span>
+                `;
+
+                    item.appendChild(titleRow);
+                    item.appendChild(meta);
+
+                    item.addEventListener('click', () => {
+                        loadChatSession(session);
+                        closeHistory();
+                    });
+
+                    ELEMENTS.historyList.appendChild(item);
                 });
-
-                titleRow.appendChild(title);
-                titleRow.appendChild(deleteBtn);
-
-                const meta = document.createElement('div');
-                meta.className = 'history-item-meta';
-                const date = new Date(session.timestamp);
-                meta.innerHTML = `
-                <span>${date.toLocaleDateString()} ${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                <span>${session.messageCount} messages</span>
-            `;
-
-                item.appendChild(titleRow);
-                item.appendChild(meta);
-
-                item.addEventListener('click', () => {
-                    loadChatSession(session);
-                    closeHistory();
-                });
-
-                ELEMENTS.historyList.appendChild(item);
             });
         }
 
@@ -1173,33 +1392,50 @@ function initChat() {
     }
 
     // Load a specific chat session
-    function loadChatSession(session) {
-        // Clear current chat
+    async function loadChatSession(session) {
+        // Save current session before loading another
+        const currentMessages = await safeStorageGet(['current_chat_messages']);
+        if (currentMessages && currentMessages.current_chat_messages?.length > 0) {
+            await saveCurrentSession();
+        }
+
+        // Clear current chat UI
         ELEMENTS.chatBox.innerHTML = '';
 
-        // Load messages
-        addSystemDivider(`Session: ${session.name}`);
+        // Track that this is a loaded session (not a new one)
+        loadedSessionId = session.id;
+        currentChatTitle = session.title || session.name;
+        currentChatId = session.id;
+
+        // Load session messages into global storage
+        await safeStorageSet({
+            current_chat_messages: session.messages || [],
+            current_chat_metadata: {
+                created_at: session.created_at || session.timestamp,
+                updated_at: session.updated_at || session.timestamp,
+                loaded_session_id: session.id,  // CRITICAL: Mark this as loaded from history
+                session_title: session.title || session.name  // Store original title
+            }
+        });
+
+        // Render messages
+        addSystemDivider(`Завантажено: ${session.title || session.name}`);
         session.messages.forEach(msg => {
             renderMessage(msg.text, msg.type, msg.timestamp);
         });
 
-        addSystemDivider('Session Loaded - Continue Chatting');
+        addSystemDivider('Продовжуйте спілкування');
+        console.log('📂 Loaded session:', session.title || session.name);
     }
 
     // Start new chat (clear current, save to history)
     async function startNewChat() {
-        if (!CURRENT_CONTEXT?.page_url) {
-            addMessage("⚠️ No page detected. Navigate to an Etsy page first.", "system");
-            return;
-        }
-
         // Check if there are any messages to save
-        const pageUrl = CURRENT_CONTEXT.page_url;
-        const urlHash = simpleHash(pageUrl);
-        const key = `history_${urlHash}`;
-        const result = await safeStorageGet([key]);
+        const result = await safeStorageGet(['current_chat_messages', 'current_chat_metadata']);
         if (!result) return; // Extension context invalidated
-        const currentMessages = result[key] || [];
+
+        const currentMessages = result.current_chat_messages || [];
+        const metadata = result.current_chat_metadata || {};
 
         // Only save if there are actual user/AI messages (not just system messages)
         const realMessages = currentMessages.filter(m => m.type === 'user' || m.type === 'ai');
@@ -1207,14 +1443,20 @@ function initChat() {
             await saveCurrentSession();
         }
 
-        // Clear current session
-        currentSessionId = null;
+        // Clear global chat storage
+        await safeStorageSet({
+            current_chat_messages: [],
+            current_chat_metadata: {}
+        });
 
-        // Clear storage for current session
-        await safeStorageSet({ [key]: [] });
+        // Reset chat title and loaded session ID
+        currentChatTitle = null;
+        loadedSessionId = null;
 
         // Clear UI
         ELEMENTS.chatBox.innerHTML = '';
+
+        console.log('🆕 New chat started');
     }
 
     // Update the existing updateContext function to handle session management
