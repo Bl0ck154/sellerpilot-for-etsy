@@ -31,3 +31,6 @@ npm-debug.log*
 dist/
 build/
 *.zip
+
+# Development documentation (not needed in published extension)
+ARCHITECTURE.md

@@ -120,9 +120,17 @@ ChromeExtensionEtsyAI/
 │   ├── content.js         # Content script entry
 │   ├── chat_ui.js         # Floating chat UI
 │   ├── chat_ui.css        # Chat styling
+│   ├── image_modal.css    # Image modal styling
+│   ├── image_modal.js     # Image download modal
 │   ├── ai_service.js      # AI API integration
+│   ├── chat_manager.js    # Chat history management
 │   ├── page_parser.js     # Page content extraction
-│   ├── modal_styles.css   # Modal/overlay styles
+│   ├── providers/         # AI service providers
+│   │   ├── gemini_service.js   # Google Gemini AI
+│   │   ├── deepseek_service.js # DeepSeek AI
+│   │   └── grok_service.js     # Grok AI
+│   ├── ai_service_factory.js   # AI provider factory
+│   ├── base_ai_service.js      # Base AI service class
 │   └── ui.html            # Chat HTML template
 └── libs/
     ├── Readability.min.js # Mozilla Readability
