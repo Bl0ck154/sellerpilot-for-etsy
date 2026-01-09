@@ -193,4 +193,4 @@ AI: ${aiResponse}`;
 // Export as a global class
 window.GeminiService = GeminiService;
 
-console.log('✅ GeminiService loaded');
+

@@ -162,4 +162,4 @@ AI: ${aiResponse}`;
 // Export as a global class
 window.GrokService = GrokService;
 
-console.log('✅ GrokService loaded');
+

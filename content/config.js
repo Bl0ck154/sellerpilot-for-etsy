@@ -51,4 +51,3 @@ window.ETSY_AI_CONFIG = {
     defaultProvider: "gemini"
 };
 
-console.log("✅ ETSY AI Config loaded:", window.ETSY_AI_CONFIG.providers.length, "providers");

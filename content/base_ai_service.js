@@ -148,4 +148,4 @@ function trimLog(str) {
 // Export as a global class
 window.BaseAIService = BaseAIService;
 
-console.log('✅ BaseAIService loaded');
+

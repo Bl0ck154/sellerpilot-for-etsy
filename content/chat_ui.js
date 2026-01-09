@@ -1,5 +1,4 @@
 ﻿// chat_ui.js - Floating Chat UI
-console.log('�� Etsy AI: Loading...');
 
 // Inject CSS
 const cssLink = document.createElement('link');
@@ -433,10 +432,8 @@ function initChat() {
             });
 
             populateModelDropdown();
-            console.log("✅ Loaded", CONFIG.models.length, "models from", window.ETSY_AI_CONFIG.providers.length, "providers");
         } else {
-            // Fallback if config.js не завантажився
-            console.warn("⚠️ config.js not loaded, using fallback model");
+            // Fallback if config.js not loaded
             CONFIG.models = [
                 { id: "gemini-3-flash-preview", name: "Gemini 3.0 Flash", provider: "gemini" }
             ];
@@ -811,12 +808,18 @@ function initChat() {
         const provider = selectedOption ? selectedOption.dataset.provider : "gemini";
 
         // Get API key for the provider
-        const apiKey = await window.AIServiceFactory.getApiKey(provider);
+        try {
+            const apiKey = await window.AIServiceFactory.getApiKey(provider);
 
-        if (!apiKey || !apiKey.trim()) {
-            // Open settings with focus on the specific provider
-            openSettingsForProvider(provider);
-            // DON'T clear input - let user try again after adding key
+            if (!apiKey || !apiKey.trim()) {
+                // Open settings with focus on the specific provider
+                openSettingsForProvider(provider);
+                // DON'T clear input - let user try again after adding key
+                return;
+            }
+        } catch (e) {
+            console.error('Failed to get API key:', e);
+            addMessage("⚠️ Extension error. Please refresh the page.", "system");
             return;
         }
 
@@ -844,6 +847,10 @@ function initChat() {
             // Get AI service instance for the SPECIFIC provider of selected model
             // This ensures we use the correct API (Gemini/DeepSeek/Grok) for the selected model
             aiService = await window.AIServiceFactory.getCurrentService(provider);
+
+            if (!aiService) {
+                throw new Error('Failed to initialize AI service');
+            }
 
             // Get API key and model for current provider  
             const providerApiKey = await window.AIServiceFactory.getApiKey(provider);
@@ -1605,4 +1612,4 @@ function initChat() {
         await originalUpdateContext.call(this, data);
     };
 }
-console.log('🍬 Etsy AI: Chat Ready');
+

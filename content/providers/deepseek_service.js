@@ -162,4 +162,4 @@ AI: ${aiResponse}`;
 // Export as a global class
 window.DeepSeekService = DeepSeekService;
 
-console.log('✅ DeepSeekService loaded');
+

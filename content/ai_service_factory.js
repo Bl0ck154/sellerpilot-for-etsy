@@ -3,19 +3,25 @@
 
 class AIServiceFactory {
     /**
+     * Check if extension context is still valid
+     * @private
+     */
+    static isExtensionContextValid() {
+        return !!(chrome.runtime && chrome.runtime.id);
+    }
+
+    /**
      * Creates an instance of the appropriate AI service provider
      * @param {string} providerId - Provider ID (gemini, deepseek, grok)
      * @returns {Promise<BaseAIService>} Instance of the provider service
      */
     static async createService(providerId) {
         // Find provider configuration
-        const provider = window.ETSY_AI_CONFIG.providers.find(p => p.id === providerId);
+        const provider = window.ETSY_AI_CONFIG?.providers?.find(p => p.id === providerId);
 
         if (!provider) {
             throw new Error(`Unknown AI provider: ${providerId}`);
         }
-
-        console.log(`🏭 Creating AI service for provider: ${provider.name}`);
 
         // Service classes are already loaded via manifest.json
         // Just instantiate the appropriate one
@@ -50,20 +56,39 @@ class AIServiceFactory {
      */
     static async getCurrentService(providerId = null) {
         try {
+            // Check extension context before storage access
+            if (!AIServiceFactory.isExtensionContextValid()) {
+                // Fallback to default if context is invalid
+                if (window.ETSY_AI_CONFIG?.defaultProvider) {
+                    return await AIServiceFactory.createService(window.ETSY_AI_CONFIG.defaultProvider);
+                }
+                throw new Error('Extension context invalidated.');
+            }
+
             // Use provided ID or get from storage
             let selectedProviderId = providerId;
 
             if (!selectedProviderId) {
-                const result = await chrome.storage.local.get(['selected_provider']);
-                selectedProviderId = result.selected_provider || window.ETSY_AI_CONFIG.defaultProvider;
+                try {
+                    const result = await chrome.storage.local.get(['selected_provider']);
+                    selectedProviderId = result.selected_provider || window.ETSY_AI_CONFIG?.defaultProvider;
+                } catch (e) {
+                    if (e.message.includes('Extension context invalidated')) {
+                        selectedProviderId = window.ETSY_AI_CONFIG?.defaultProvider;
+                    } else {
+                        throw e;
+                    }
+                }
             }
 
-            console.log(`📌 Using AI provider: ${selectedProviderId}`);
             return await AIServiceFactory.createService(selectedProviderId);
         } catch (error) {
-            console.error('Failed to get current service:', error);
+            console.error('Failed to get current service, falling back to default:', error);
             // Fallback to default provider
-            return await AIServiceFactory.createService(window.ETSY_AI_CONFIG.defaultProvider);
+            if (window.ETSY_AI_CONFIG?.defaultProvider) {
+                return await AIServiceFactory.createService(window.ETSY_AI_CONFIG.defaultProvider);
+            }
+            throw error;
         }
     }
 
@@ -73,9 +98,21 @@ class AIServiceFactory {
      * @returns {Promise<string|null>} API key or null if not found
      */
     static async getApiKey(providerId) {
-        const storageKey = `${providerId}_api_key`;
-        const result = await chrome.storage.local.get([storageKey]);
-        return result[storageKey] || null;
+        // Check extension context before storage access
+        if (!AIServiceFactory.isExtensionContextValid()) {
+            return null;
+        }
+
+        try {
+            const storageKey = `${providerId}_api_key`;
+            const result = await chrome.storage.local.get([storageKey]);
+            return result[storageKey] || null;
+        } catch (e) {
+            if (e.message.includes('Extension context invalidated')) {
+                return null;
+            }
+            throw e;
+        }
     }
 
     /**
@@ -84,20 +121,33 @@ class AIServiceFactory {
      * @returns {Promise<string>} Model ID
      */
     static async getModelId(providerId) {
-        const storageKey = `${providerId}_model`;
-        const result = await chrome.storage.local.get([storageKey]);
-
-        // If no model selected, use default from config
-        if (!result[storageKey]) {
-            const provider = window.ETSY_AI_CONFIG.providers.find(p => p.id === providerId);
-            return provider?.defaultModel || provider?.models[0]?.id;
+        // Check extension context before storage access
+        if (!AIServiceFactory.isExtensionContextValid()) {
+            const provider = window.ETSY_AI_CONFIG?.providers?.find(p => p.id === providerId);
+            return provider?.defaultModel || provider?.models[0]?.id || '';
         }
 
-        return result[storageKey];
+        try {
+            const storageKey = `${providerId}_model`;
+            const result = await chrome.storage.local.get([storageKey]);
+
+            // If no model selected, use default from config
+            if (!result[storageKey]) {
+                const provider = window.ETSY_AI_CONFIG?.providers?.find(p => p.id === providerId);
+                return provider?.defaultModel || provider?.models[0]?.id || '';
+            }
+
+            return result[storageKey];
+        } catch (e) {
+            if (e.message.includes('Extension context invalidated')) {
+                const provider = window.ETSY_AI_CONFIG?.providers?.find(p => p.id === providerId);
+                return provider?.defaultModel || provider?.models[0]?.id || '';
+            }
+            throw e;
+        }
     }
 }
 
 // Export as a global class
 window.AIServiceFactory = AIServiceFactory;
 
-console.log('✅ AIServiceFactory loaded');

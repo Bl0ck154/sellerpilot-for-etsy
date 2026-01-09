@@ -1,5 +1,5 @@
 // content.js
-console.log("🍬 Etsy AI Candy: Content Script Loaded (Visual Debug Edition)");
+
 
 let lastContext = null;
 let debounceTimer = null;
