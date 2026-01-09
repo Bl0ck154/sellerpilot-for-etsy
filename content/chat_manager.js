@@ -28,6 +28,12 @@
 
             injectStyles();
             startMonitoring();
+
+            // Initialize image modal if available
+            if (window.EtsyImageModal) {
+                window.EtsyImageModal.init();
+            }
+
             isInitialized = true;
         },
 
@@ -61,6 +67,11 @@
 
             // Clean up DOM modifications
             forceCleanupChatMode();
+
+            // Clean up image modal
+            if (window.EtsyImageModal) {
+                window.EtsyImageModal.cleanup();
+            }
 
             // Reset state
             draftCleanerAttached = false;

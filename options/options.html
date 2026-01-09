@@ -29,8 +29,51 @@
                         </p>
                     </div>
                     <div class="input-with-toggle">
-                        <input type="password" id="apiKeyInput" class="input-field" placeholder="Enter your API key...">
-                        <button type="button" id="toggleApiKeyVisibility" class="toggle-visibility-btn"
+                        <input type="password" id="geminiApiKeyInput" class="input-field"
+                            placeholder="Enter Gemini API key...">
+                        <button type="button" class="toggle-visibility-btn" data-target="geminiApiKeyInput"
+                            title="Show/Hide API Key">👁️</button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- DeepSeek API Key Section -->
+            <section class="settings-section">
+                <div class="setting-item setting-item-vertical">
+                    <div class="setting-info">
+                        <h2>🔑 DeepSeek API Key</h2>
+                        <p class="description">
+                            Enter your DeepSeek API key to enable DeepSeek models.
+                            <br>
+                            <small>Get your API key from <a href="https://platform.deepseek.com/api_keys"
+                                    target="_blank">DeepSeek Platform</a></small>
+                        </p>
+                    </div>
+                    <div class="input-with-toggle">
+                        <input type="password" id="deepseekApiKeyInput" class="input-field"
+                            placeholder="Enter DeepSeek API key...">
+                        <button type="button" class="toggle-visibility-btn" data-target="deepseekApiKeyInput"
+                            title="Show/Hide API Key">👁️</button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Grok API Key Section -->
+            <section class="settings-section">
+                <div class="setting-item setting-item-vertical">
+                    <div class="setting-info">
+                        <h2>🔑 Grok API Key</h2>
+                        <p class="description">
+                            Enter your Grok (xAI) API key to enable Grok models.
+                            <br>
+                            <small>Get your API key from <a href="https://console.x.ai/" target="_blank">xAI
+                                    Console</a></small>
+                        </p>
+                    </div>
+                    <div class="input-with-toggle">
+                        <input type="password" id="grokApiKeyInput" class="input-field"
+                            placeholder="Enter Grok API key...">
+                        <button type="button" class="toggle-visibility-btn" data-target="grokApiKeyInput"
                             title="Show/Hide API Key">👁️</button>
                     </div>
                 </div>
@@ -90,6 +133,7 @@
         </footer>
     </div>
 
+    <script src="../content/config.js"></script>
     <script src="../config/base_instruction.js"></script>
     <script src="options.js"></script>
 </body>

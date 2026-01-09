@@ -361,7 +361,7 @@ function initChat() {
         }
     }
 
-    const aiService = new window.AIService();
+    let aiService = null; // Will be loaded dynamically via factory
 
     let CONFIG = {
         apiKeys: {
@@ -386,7 +386,9 @@ function initChat() {
         // Settings
         settingsBtn: document.getElementById('settings-btn'),
         settingsOverlay: document.getElementById('settings-overlay'),
-        apiKeyInput: document.getElementById('api-key-input'),
+        geminiApiKeyInput: document.getElementById('gemini-api-key-input'),
+        deepseekApiKeyInput: document.getElementById('deepseek-api-key-input'),
+        grokApiKeyInput: document.getElementById('grok-api-key-input'),
         saveSettingsBtn: document.getElementById('save-settings'),
         cancelSettingsBtn: document.getElementById('cancel-settings'),
         // History
@@ -416,38 +418,87 @@ function initChat() {
 
     // --- CONFIGURATION ---
     async function loadConfiguration() {
-        // 1. Load models from config.js (window.ETSY_AI_CONFIG)
-        if (window.ETSY_AI_CONFIG && window.ETSY_AI_CONFIG.models) {
-            CONFIG.models = window.ETSY_AI_CONFIG.models;
+        // 1. Load models from config.js (window.ETSY_AI_CONFIG) - now using providers
+        if (window.ETSY_AI_CONFIG && window.ETSY_AI_CONFIG.providers) {
+            // Flatten all models from all providers for backward compatibility with UI
+            CONFIG.models = [];
+            window.ETSY_AI_CONFIG.providers.forEach(provider => {
+                provider.models.forEach(model => {
+                    CONFIG.models.push({
+                        id: model.id,
+                        name: model.name, // Just model name, without provider prefix
+                        provider: provider.id
+                    });
+                });
+            });
+
             populateModelDropdown();
-            console.log("✅ Loaded", CONFIG.models.length, "models from config.js");
+            console.log("✅ Loaded", CONFIG.models.length, "models from", window.ETSY_AI_CONFIG.providers.length, "providers");
         } else {
             // Fallback if config.js не завантажився
             console.warn("⚠️ config.js not loaded, using fallback model");
             CONFIG.models = [
-                { id: "gemini-3-flash-preview", name: "Gemini 3.0 Flash (Preview)", provider: "google" }
+                { id: "gemini-3-flash-preview", name: "Gemini 3.0 Flash", provider: "gemini" }
             ];
             populateModelDropdown();
         }
 
-        // 2. Load API keys from Storage
-        const result = await safeStorageGet(['custom_api_keys', 'preferred_model']);
+        // 2. Load API keys from Storage - now checking all providers
+        const result = await safeStorageGet(['selected_provider', 'gemini_api_key', 'deepseek_api_key', 'grok_api_key', 'preferred_model']);
         if (!result) return; // Extension context invalidated
 
-        if (result.custom_api_keys) {
-            CONFIG.apiKeys = { ...CONFIG.apiKeys, ...result.custom_api_keys };
+        // Load API keys for all providers
+        const availableKeys = {
+            gemini: result.gemini_api_key || null,
+            deepseek: result.deepseek_api_key || null,
+            grok: result.grok_api_key || null
+        };
+
+        if (result.gemini_api_key) {
+            CONFIG.apiKeys.google = result.gemini_api_key;
         }
 
-        // 3. Set default model if not already selected
-        if (!result.preferred_model && window.ETSY_AI_CONFIG?.defaultModel) {
-            ELEMENTS.modelSelect.value = window.ETSY_AI_CONFIG.defaultModel;
-            await safeStorageSet({ 'preferred_model': window.ETSY_AI_CONFIG.defaultModel });
-            console.log("✅ Set default model:", window.ETSY_AI_CONFIG.defaultModel);
+        // Check if at least one API key is configured
+        const hasAnyKey = Object.values(availableKeys).some(key => key && key.trim());
+
+        // 3. Set default model - prefer one with available API key
+        if (!result.preferred_model) {
+            let selectedModel = null;
+
+            // Try to find a model with an available API key
+            if (window.ETSY_AI_CONFIG?.defaultProvider && availableKeys[window.ETSY_AI_CONFIG.defaultProvider]) {
+                const defaultProvider = window.ETSY_AI_CONFIG.providers.find(p => p.id === window.ETSY_AI_CONFIG.defaultProvider);
+                if (defaultProvider && defaultProvider.defaultModel) {
+                    selectedModel = defaultProvider.defaultModel;
+                }
+            } else {
+                // Find first provider with an available key
+                for (const provider of window.ETSY_AI_CONFIG.providers) {
+                    if (availableKeys[provider.id]) {
+                        selectedModel = provider.defaultModel;
+                        break;
+                    }
+                }
+            }
+
+            // Fallback to default provider's model if none found
+            if (!selectedModel && window.ETSY_AI_CONFIG?.defaultProvider) {
+                const defaultProvider = window.ETSY_AI_CONFIG.providers.find(p => p.id === window.ETSY_AI_CONFIG.defaultProvider);
+                if (defaultProvider) {
+                    selectedModel = defaultProvider.defaultModel;
+                }
+            }
+
+            if (selectedModel) {
+                ELEMENTS.modelSelect.value = selectedModel;
+                await safeStorageSet({ 'preferred_model': selectedModel });
+                console.log("✅ Set default model:", selectedModel);
+            }
         }
 
-        // 4. Check if API key is configured
-        if (!CONFIG.apiKeys.google || CONFIG.apiKeys.google === "YOUR_Google_API_KEY") {
-            addMessage("⚠️ Please configure your Google API Key in Settings.", "system");
+        // 4. Show settings only if NO API keys configured at all
+        if (!hasAnyKey) {
+            addMessage("⚠️ Please configure at least one API Key in Settings.", "system");
             openSettings();
         }
     }
@@ -518,8 +569,22 @@ function initChat() {
             }
         });
 
-        ELEMENTS.modelSelect.addEventListener('change', () => {
-            safeStorageSet({ 'preferred_model': ELEMENTS.modelSelect.value });
+        ELEMENTS.modelSelect.addEventListener('change', async () => {
+            const selectedModelId = ELEMENTS.modelSelect.value;
+            await safeStorageSet({ 'preferred_model': selectedModelId });
+
+            // Check if selected model has API key
+            const selectedOption = ELEMENTS.modelSelect.options[ELEMENTS.modelSelect.selectedIndex];
+            const providerId = selectedOption ? selectedOption.dataset.provider : null;
+
+            if (providerId) {
+                const apiKey = await window.AIServiceFactory.getApiKey(providerId);
+
+                if (!apiKey || !apiKey.trim()) {
+                    // Show settings with focus on the appropriate field
+                    openSettingsForProvider(providerId);
+                }
+            }
         });
 
         // History and New Chat
@@ -537,11 +602,51 @@ function initChat() {
 
     // --- SETTINGS LOGIC ---
     function openSettings() {
-        // Determine which key to show. For now simple UI only shows Google.
-        // Future: Dynamic UI based on needed providers.
-        ELEMENTS.apiKeyInput.value = CONFIG.apiKeys.google || "";
+        // Load all API keys
+        safeStorageGet(['gemini_api_key', 'deepseek_api_key', 'grok_api_key']).then(result => {
+            if (result) {
+                ELEMENTS.geminiApiKeyInput.value = result.gemini_api_key || '';
+                ELEMENTS.deepseekApiKeyInput.value = result.deepseek_api_key || '';
+                ELEMENTS.grokApiKeyInput.value = result.grok_api_key || '';
+            }
+        });
+
         ELEMENTS.settingsOverlay.classList.add('visible');
-        ELEMENTS.apiKeyInput.focus();
+        ELEMENTS.geminiApiKeyInput.focus();
+    }
+
+    function openSettingsForProvider(providerId) {
+        // Load all API keys
+        safeStorageGet(['gemini_api_key', 'deepseek_api_key', 'grok_api_key']).then(result => {
+            if (result) {
+                ELEMENTS.geminiApiKeyInput.value = result.gemini_api_key || '';
+                ELEMENTS.deepseekApiKeyInput.value = result.deepseek_api_key || '';
+                ELEMENTS.grokApiKeyInput.value = result.grok_api_key || '';
+            }
+
+            // Focus on the specific provider's input
+            setTimeout(() => {
+                switch (providerId) {
+                    case 'gemini':
+                        ELEMENTS.geminiApiKeyInput.focus();
+                        break;
+                    case 'deepseek':
+                        ELEMENTS.deepseekApiKeyInput.focus();
+                        break;
+                    case 'grok':
+                        ELEMENTS.grokApiKeyInput.focus();
+                        break;
+                    default:
+                        ELEMENTS.geminiApiKeyInput.focus();
+                }
+            }, 100);
+        });
+
+        ELEMENTS.settingsOverlay.classList.add('visible');
+
+        // Show message about missing API key
+        const providerName = providerId.charAt(0).toUpperCase() + providerId.slice(1);
+        addMessage(`⚠️ Please configure your ${providerName} API Key to use this model.`, "system");
     }
 
     function closeSettings() {
@@ -549,18 +654,22 @@ function initChat() {
     }
 
     async function saveSettings() {
-        const key = ELEMENTS.apiKeyInput.value.trim();
-        if (key) {
-            CONFIG.apiKeys.google = key;
+        const geminiKey = ELEMENTS.geminiApiKeyInput.value.trim();
+        const deepseekKey = ELEMENTS.deepseekApiKeyInput.value.trim();
+        const grokKey = ELEMENTS.grokApiKeyInput.value.trim();
 
-            // Save entire keys object
-            await safeStorageSet({ 'custom_api_keys': CONFIG.apiKeys });
+        // Save all keys
+        await safeStorageSet({
+            gemini_api_key: geminiKey,
+            deepseek_api_key: deepseekKey,
+            grok_api_key: grokKey
+        });
 
-            closeSettings();
-            addMessage("✅ API Key Saved", "system");
-        } else {
-            alert("Please enter a valid Google API Key");
-        }
+        // Update in-memory config for backward compatibility
+        if (geminiKey) CONFIG.apiKeys.google = geminiKey;
+
+        closeSettings();
+        addMessage("✅ API Keys Saved", "system");
     }
 
     // --- APP LOGIC ---
@@ -699,14 +808,20 @@ function initChat() {
         // 1. Check Config
         const modelId = ELEMENTS.modelSelect.value;
         const selectedOption = ELEMENTS.modelSelect.options[ELEMENTS.modelSelect.selectedIndex];
-        const provider = selectedOption ? selectedOption.dataset.provider : "google";
-        const apiKey = CONFIG.apiKeys[provider];
+        const provider = selectedOption ? selectedOption.dataset.provider : "gemini";
 
-        if (!apiKey) {
-            addMessage(`⚠️ Missing API Key for ${provider}.`, "system");
-            openSettings();
+        // Get API key for the provider
+        const apiKey = await window.AIServiceFactory.getApiKey(provider);
+
+        if (!apiKey || !apiKey.trim()) {
+            // Open settings with focus on the specific provider
+            openSettingsForProvider(provider);
+            // DON'T clear input - let user try again after adding key
             return;
         }
+
+        // Clear input only after validation passes
+        ELEMENTS.userInput.innerText = "";
 
         // Set processing state
         isProcessing = true;
@@ -726,12 +841,24 @@ function initChat() {
         const loadingMsgId = showLoadingDots();
 
         try {
+            // Get AI service instance for the SPECIFIC provider of selected model
+            // This ensures we use the correct API (Gemini/DeepSeek/Grok) for the selected model
+            aiService = await window.AIServiceFactory.getCurrentService(provider);
+
+            // Get API key and model for current provider  
+            const providerApiKey = await window.AIServiceFactory.getApiKey(provider);
+            const providerModelId = await window.AIServiceFactory.getModelId(provider);
+
+            if (!providerApiKey) {
+                throw new Error(`No API key configured for provider: ${provider}`);
+            }
+
             // Build conversation history for multi-turn chat from global storage
             const conversationHistory = await aiService.buildConversationHistory('global_chat', userMessageText);
             const { systemInstruction } = await aiService.constructPromptData(CURRENT_CONTEXT, userMessageText);
 
-            // Call streaming API з callbacks
-            await streamAIResponse(modelId, apiKey, conversationHistory, systemInstruction);
+            // Pass messages instead of contents to be provider-agnostic
+            await streamAIResponse(providerModelId, providerApiKey, conversationHistory, systemInstruction);
 
         } catch (e) {
             removeLoadingMessage();
@@ -756,7 +883,8 @@ function initChat() {
             return; // Keep text in input, don't clear
         }
 
-        ELEMENTS.userInput.innerText = "";
+        // DON'T clear input yet - only clear after successful send
+        // ELEMENTS.userInput.innerText = "";
 
         handleChatInteraction(text);
     }
@@ -1079,7 +1207,7 @@ function initChat() {
         await aiService.streamMessage({
             modelId,
             apiKey,
-            contents: conversationHistory,
+            messages: conversationHistory,
             systemInstruction,
             onChunk,
             onComplete,
