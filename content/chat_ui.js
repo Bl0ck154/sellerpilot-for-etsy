@@ -1613,3 +1613,17 @@ function initChat() {
     };
 }
 
+// ============================================
+// Обробник повідомлень для автооновлення
+// ============================================
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message.type === 'CHECK_CHAT_WINDOW') {
+        // Перевіряємо чи вікно чату відкрите
+        const chatContainer = document.getElementById('etsy-ai-chat-container');
+        const isOpen = chatContainer && chatContainer.classList.contains('visible');
+
+        sendResponse({ isOpen: isOpen });
+        return true; // Keep message channel open for async response
+    }
+});

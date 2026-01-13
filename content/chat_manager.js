@@ -244,12 +244,15 @@
             position: static !important;
         }
 
-        /* Контейнер у списку */
+        /* Контейнер у списку - використовуємо flex для правильної адаптації */
         body.ecm-list-mode .wt-grid.wt-overflow-hidden.wt-bt-xs.wt-width-full {
             position: relative !important;
-            display: block !important;
+            display: flex !important;
+            flex-direction: row !important;
+            flex-wrap: nowrap !important;
             margin-top: 0 !important;
             top: 0 !important;
+            width: 100% !important;
         }
 
         /* ЛІВА КОЛОНКА В СПИСКУ */
@@ -258,6 +261,15 @@
             min-width: var(--wl) !important;
             max-width: var(--wl) !important;
             flex: 0 0 var(--wl) !important;
+            box-sizing: border-box !important;
+        }
+
+        /* СПИСОК ЧАТІВ (права колонка) - має пріоритет і займає весь залишковий простір */
+        body.ecm-list-mode .convo-inbox-main-container {
+            flex: 1 1 auto !important;
+            width: 0 !important;
+            min-width: 0 !important;
+            max-width: none !important;
             box-sizing: border-box !important;
         }
 
@@ -333,7 +345,18 @@
 
         if (!sendBtn || !textarea || draftCleanerAttached) return;
 
-        const clearDraft = () => {
+        const clearDraftAndMarkSent = () => {
+            const m = location.href.match(/\/messages\/(\d+)/);
+            if (m) {
+                const id = m[1];
+                // Видаляємо draft НЕГАЙНО
+                localStorage.removeItem('draft_' + id);
+                // Зберігаємо timestamp відправки
+                localStorage.setItem('sent_' + id, Date.now().toString());
+            }
+        };
+
+        const clearEmptyDraft = () => {
             const m = location.href.match(/\/messages\/(\d+)/);
             if (m) {
                 const id = m[1];
@@ -341,19 +364,22 @@
             }
         };
 
+        // НЕГАЙНЕ очищення при кліку на Send
         sendBtn.addEventListener('click', () => {
-            setTimeout(clearDraft, 300);
+            clearDraftAndMarkSent();
         });
 
+        // НЕГАЙНЕ очищення при Enter (без Shift)
         textarea.addEventListener('keydown', (e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
-                setTimeout(clearDraft, 300);
+                clearDraftAndMarkSent();
             }
         });
 
+        // Очищення при порожньому полі (користувач стер текст)
         textarea.addEventListener('input', (e) => {
             if (e.target.value.trim() === '') {
-                clearDraft();
+                clearEmptyDraft();
             }
         });
 
@@ -448,12 +474,33 @@
             const id = m[1];
 
             if (!area.dataset.saved) {
-                const v = localStorage.getItem('draft_' + id);
-                if (v) {
-                    area.value = v;
-                    area.dispatchEvent(new Event('input', { bubbles: true }));
+                const savedDraft = localStorage.getItem('draft_' + id);
+                const lastSentTime = localStorage.getItem('sent_' + id);
+
+                // Відновлюємо draft ТІЛЬКИ якщо:
+                // 1. Draft існує
+                // 2. НЕ було відправки, АБО draft був збережений ПІСЛЯ останньої відправки
+                if (savedDraft) {
+                    let shouldRestore = true;
+
+                    if (lastSentTime) {
+                        // Перевіряємо: чи поле вже порожнє (Etsy очистив після відправки)
+                        // Якщо порожнє - це означає що повідомлення вже відправлене
+                        if (area.value.trim() === '') {
+                            shouldRestore = false;
+                        }
+                    }
+
+                    if (shouldRestore) {
+                        area.value = savedDraft;
+                        area.dispatchEvent(new Event('input', { bubbles: true }));
+                    } else {
+                        // Якщо не відновлюємо - видаляємо старий draft
+                        localStorage.removeItem('draft_' + id);
+                    }
                 }
 
+                // Зберігаємо draft при кожному введенні
                 area.oninput = (e) => {
                     const text = e.target.value;
                     if (text.trim() !== '') {
