@@ -1,21 +1,35 @@
 ﻿// chat_ui.js - Floating Chat UI
 
-// Inject CSS
-const cssLink = document.createElement('link');
-cssLink.rel = 'stylesheet';
-cssLink.href = chrome.runtime.getURL('content/chat_ui.css');
-document.head.appendChild(cssLink);
-
-// Inject fonts
-const fontLink = document.createElement('link');
-fontLink.rel = 'stylesheet';
-fontLink.href = 'https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap';
-document.head.appendChild(fontLink);
-
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init);
+// ============================================
+// Early Extension Context Check
+// ============================================
+// This must run FIRST before any chrome.* API calls
+if (!chrome.runtime?.id) {
+    console.error('🔴 Extension context is invalid - cannot initialize chat UI');
+    // We can't inject CSS or UI, so we're done here
+    // The interval check in initChat will catch this if context becomes invalid later
 } else {
-    init();
+    // Inject CSS
+    try {
+        const cssLink = document.createElement('link');
+        cssLink.rel = 'stylesheet';
+        cssLink.href = chrome.runtime.getURL('content/chat_ui.css');
+        document.head.appendChild(cssLink);
+    } catch (e) {
+        console.error('⚠️ Failed to inject CSS:', e);
+    }
+
+    // Inject fonts
+    const fontLink = document.createElement('link');
+    fontLink.rel = 'stylesheet';
+    fontLink.href = 'https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap';
+    document.head.appendChild(fontLink);
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init);
+    } else {
+        init();
+    }
 }
 
 async function init() {
@@ -398,9 +412,17 @@ function initChat() {
         closeHistoryBtn: document.getElementById('close-history')
     };
 
+
     // --- INITIALIZATION ---
     // DOM is already ready, call init functions directly
     (async () => {
+        // Check if extension context is valid BEFORE doing anything
+        if (!chrome.runtime?.id) {
+            console.error('🔴 Extension context invalidated - extension was reloaded/updated');
+            showExtensionReloadedBanner();
+            return; // Don't initialize anything
+        }
+
         await handleBrowserRestart(); // Auto-save previous chat if exists
         await loadConfiguration();
         restoreState();
@@ -413,6 +435,14 @@ function initChat() {
                 updateContext(result.current_context);
             }
         });
+
+        // Periodically check if extension context is still valid
+        setInterval(() => {
+            if (!chrome.runtime?.id) {
+                console.error('🔴 Extension context lost during runtime');
+                showExtensionReloadedBanner();
+            }
+        }, 5000); // Check every 5 seconds
     })();
 
     // --- CONFIGURATION ---
@@ -442,7 +472,12 @@ function initChat() {
 
         // 2. Load API keys from Storage - now checking all providers
         const result = await safeStorageGet(['selected_provider', 'gemini_api_key', 'deepseek_api_key', 'grok_api_key', 'preferred_model']);
-        if (!result) return; // Extension context invalidated
+        if (!result) {
+            // Extension context invalidated - storage unavailable
+            console.error('⚠️ Storage unavailable - extension context may be invalid');
+            addMessage("⚠️ Extension is initializing. If this persists, please reload the page (F5).", "system");
+            return; // Don't proceed, don't open settings
+        }
 
         // Load API keys for all providers
         const availableKeys = {
@@ -598,46 +633,56 @@ function initChat() {
     }
 
     // --- SETTINGS LOGIC ---
-    function openSettings() {
+    async function openSettings() {
         // Load all API keys
-        safeStorageGet(['gemini_api_key', 'deepseek_api_key', 'grok_api_key']).then(result => {
-            if (result) {
-                ELEMENTS.geminiApiKeyInput.value = result.gemini_api_key || '';
-                ELEMENTS.deepseekApiKeyInput.value = result.deepseek_api_key || '';
-                ELEMENTS.grokApiKeyInput.value = result.grok_api_key || '';
-            }
-        });
+        const result = await safeStorageGet(['gemini_api_key', 'deepseek_api_key', 'grok_api_key']);
+
+        if (!result) {
+            // Storage unavailable - don't open settings with empty fields
+            addMessage("❌ Cannot open settings - extension is reloading. Please reload this page (F5) and try again.", "system");
+            console.error('⚠️ Cannot open settings - storage unavailable');
+            return;
+        }
+
+        ELEMENTS.geminiApiKeyInput.value = result.gemini_api_key || '';
+        ELEMENTS.deepseekApiKeyInput.value = result.deepseek_api_key || '';
+        ELEMENTS.grokApiKeyInput.value = result.grok_api_key || '';
 
         ELEMENTS.settingsOverlay.classList.add('visible');
         ELEMENTS.geminiApiKeyInput.focus();
     }
 
-    function openSettingsForProvider(providerId) {
+    async function openSettingsForProvider(providerId) {
         // Load all API keys
-        safeStorageGet(['gemini_api_key', 'deepseek_api_key', 'grok_api_key']).then(result => {
-            if (result) {
-                ELEMENTS.geminiApiKeyInput.value = result.gemini_api_key || '';
-                ELEMENTS.deepseekApiKeyInput.value = result.deepseek_api_key || '';
-                ELEMENTS.grokApiKeyInput.value = result.grok_api_key || '';
-            }
+        const result = await safeStorageGet(['gemini_api_key', 'deepseek_api_key', 'grok_api_key']);
 
-            // Focus on the specific provider's input
-            setTimeout(() => {
-                switch (providerId) {
-                    case 'gemini':
-                        ELEMENTS.geminiApiKeyInput.focus();
-                        break;
-                    case 'deepseek':
-                        ELEMENTS.deepseekApiKeyInput.focus();
-                        break;
-                    case 'grok':
-                        ELEMENTS.grokApiKeyInput.focus();
-                        break;
-                    default:
-                        ELEMENTS.geminiApiKeyInput.focus();
-                }
-            }, 100);
-        });
+        if (!result) {
+            // Storage unavailable - don't open settings with empty fields
+            addMessage("❌ Cannot open settings - extension is reloading. Please reload this page (F5) and try again.", "system");
+            console.error('⚠️ Cannot open settings - storage unavailable');
+            return;
+        }
+
+        ELEMENTS.geminiApiKeyInput.value = result.gemini_api_key || '';
+        ELEMENTS.deepseekApiKeyInput.value = result.deepseek_api_key || '';
+        ELEMENTS.grokApiKeyInput.value = result.grok_api_key || '';
+
+        // Focus on the specific provider's input
+        setTimeout(() => {
+            switch (providerId) {
+                case 'gemini':
+                    ELEMENTS.geminiApiKeyInput.focus();
+                    break;
+                case 'deepseek':
+                    ELEMENTS.deepseekApiKeyInput.focus();
+                    break;
+                case 'grok':
+                    ELEMENTS.grokApiKeyInput.focus();
+                    break;
+                default:
+                    ELEMENTS.geminiApiKeyInput.focus();
+            }
+        }, 100);
 
         ELEMENTS.settingsOverlay.classList.add('visible');
 
@@ -656,11 +701,19 @@ function initChat() {
         const grokKey = ELEMENTS.grokApiKeyInput.value.trim();
 
         // Save all keys
-        await safeStorageSet({
+        const saveSuccess = await safeStorageSet({
             gemini_api_key: geminiKey,
             deepseek_api_key: deepseekKey,
             grok_api_key: grokKey
         });
+
+        // Check if save was successful
+        if (!saveSuccess) {
+            // Extension context is invalid, show error and keep settings open
+            addMessage("❌ Failed to save API keys. Please reload this page (F5) and try again.", "system");
+            console.error('⚠️ Cannot save API keys - extension context invalid. User should reload the page.');
+            return; // Don't close settings
+        }
 
         // Update in-memory config for backward compatibility
         if (geminiKey) CONFIG.apiKeys.google = geminiKey;
@@ -1614,16 +1667,130 @@ function initChat() {
 }
 
 // ============================================
+// Extension Context Invalidation Handler
+// ============================================
+
+/**
+ * Shows a banner inside the chat window when extension is reloaded/updated
+ * Instructs user to reload the page to restore functionality
+ */
+function showExtensionReloadedBanner() {
+    // Check if banner already exists
+    if (document.getElementById('etsy-ai-reload-banner')) return;
+
+    const chatBox = document.getElementById('chat-box');
+    if (!chatBox) return; // Chat container doesn't exist yet
+
+    // Clear chat box and show reload banner
+    chatBox.innerHTML = '';
+
+    const banner = document.createElement('div');
+    banner.id = 'etsy-ai-reload-banner';
+    banner.style.cssText = `
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        height: 100%;
+        padding: 30px;
+        text-align: center;
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    `;
+
+    banner.innerHTML = `
+        <div style="
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 30px 40px;
+            border-radius: 16px;
+            box-shadow: 0 8px 24px rgba(102, 126, 234, 0.3);
+            max-width: 100%;
+        ">
+            <div style="font-size: 48px; margin-bottom: 15px;">🔄</div>
+            <h2 style="
+                color: white;
+                font-size: 22px;
+                font-weight: 700;
+                margin: 0 0 12px 0;
+            ">Extension Updated</h2>
+            <p style="
+                color: rgba(255,255,255,0.95);
+                font-size: 14px;
+                line-height: 1.5;
+                margin: 0 0 20px 0;
+            ">
+                The extension has been updated.<br>
+                Please reload this page to continue.
+            </p>
+            <button onclick="location.reload()" style="
+                background: white;
+                color: #667eea;
+                border: none;
+                padding: 12px 30px;
+                font-size: 15px;
+                font-weight: 600;
+                border-radius: 8px;
+                cursor: pointer;
+                transition: all 0.2s;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+                font-family: 'Inter', sans-serif;
+            " onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 4px 12px rgba(0,0,0,0.2)'" onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 8px rgba(0,0,0,0.15)'">
+                🔄 Reload Page
+            </button>
+        </div>
+    `;
+
+    chatBox.appendChild(banner);
+
+    // Disable input and buttons
+    const userInput = document.getElementById('user-input');
+    const sendBtn = document.getElementById('send-btn');
+    const generateBtn = document.getElementById('generate-btn');
+    const modelSelect = document.getElementById('model-select');
+    const historyBtn = document.getElementById('history-btn');
+    const newChatBtn = document.getElementById('new-chat-btn');
+
+    if (userInput) {
+        userInput.contentEditable = 'false';
+        userInput.style.opacity = '0.5';
+    }
+    if (sendBtn) {
+        sendBtn.disabled = true;
+        sendBtn.style.opacity = '0.3';
+    }
+    if (generateBtn) {
+        generateBtn.disabled = true;
+        generateBtn.style.opacity = '0.3';
+    }
+    if (modelSelect) {
+        modelSelect.disabled = true;
+        modelSelect.style.opacity = '0.5';
+    }
+    if (historyBtn) {
+        historyBtn.disabled = true;
+        historyBtn.style.opacity = '0.3';
+    }
+    if (newChatBtn) {
+        newChatBtn.disabled = true;
+        newChatBtn.style.opacity = '0.3';
+    }
+}
+
+// ============================================
 // Обробник повідомлень для автооновлення
 // ============================================
 
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (message.type === 'CHECK_CHAT_WINDOW') {
-        // Перевіряємо чи вікно чату відкрите
-        const chatContainer = document.getElementById('etsy-ai-chat-container');
-        const isOpen = chatContainer && chatContainer.classList.contains('visible');
+try {
+    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+        if (message.type === 'CHECK_CHAT_WINDOW') {
+            // Перевіряємо чи вікно чату відкрите
+            const chatContainer = document.getElementById('etsy-ai-chat-container');
+            const isOpen = chatContainer && chatContainer.classList.contains('visible');
 
-        sendResponse({ isOpen: isOpen });
-        return true; // Keep message channel open for async response
-    }
-});
+            sendResponse({ isOpen: isOpen });
+            return true; // Keep message channel open for async response
+        }
+    });
+} catch (e) {
+    // Extension context may be invalid
+    console.error('⚠️ Failed to register message listener - extension context may be invalid', e);
+}
