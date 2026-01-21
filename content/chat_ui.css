@@ -279,7 +279,48 @@
     border: 1px solid var(--border-color);
     border-bottom-left-radius: 4px;
     width: 90%;
-}
+}\r
+\r
+/* Error messages with retry button */\r
+.etsy-ai-msg.error {\r
+    background: rgba(239, 68, 68, 0.1);\r
+    border-left: 3px solid #EF4444;\r
+    align-self: flex-start;\r
+    width: 90%;\r
+}\r
+\r
+.error-content {\r
+    display: flex;\r
+    align-items: center;\r
+    gap: 10px;\r
+    flex-wrap: wrap;\r
+}\r
+\r
+.retry-btn {\r
+    background: linear-gradient(135deg, #EF4444, #DC2626);\r
+    border: none;\r
+    border-radius: 6px;\r
+    padding: 6px 10px;\r
+    font-size: 16px;\r
+    cursor: pointer;\r
+    transition: all 0.2s ease;\r
+    flex-shrink: 0;\r
+}\r
+\r
+.retry-btn:hover:not(:disabled) {\r
+    background: linear-gradient(135deg, #DC2626, #B91C1C);\r
+    transform: scale(1.05);\r
+}\r
+\r
+.retry-btn:active:not(:disabled) {\r
+    transform: scale(0.95);\r
+}\r
+\r
+.retry-btn:disabled {\r
+    opacity: 0.5;\r
+    cursor: not-allowed;\r
+}\r
+
 
 .etsy-ai-msg.ai pre {
     background-color: #F3F4F6;

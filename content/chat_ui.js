@@ -387,6 +387,7 @@ function initChat() {
     let currentChatId = null; // ID for current chat session
     let currentChatTitle = null; // AI-generated title (will be set after first exchange)
     let loadedSessionId = null; // ID of loaded session from history (to update instead of duplicate)
+    let lastUserMessage = null; // Stores last user message context for retry functionality
 
     const ELEMENTS = {
         statusDot: document.getElementById('connection-status'),
@@ -928,12 +929,20 @@ function initChat() {
             const conversationHistory = await aiService.buildConversationHistory('global_chat', userMessageText);
             const { systemInstruction } = await aiService.constructPromptData(CURRENT_CONTEXT, userMessageText);
 
+            // Store minimal message context for retry functionality (history will be rebuilt on retry)
+            lastUserMessage = {
+                text: userMessageText,
+                provider: provider,
+                modelId: providerModelId,
+                apiKey: providerApiKey
+            };
+
             // Pass messages instead of contents to be provider-agnostic
             await streamAIResponse(providerModelId, providerApiKey, conversationHistory, systemInstruction);
 
         } catch (e) {
             removeLoadingMessage();
-            addMessage(`Error: ${e.message}`, "system");
+            addErrorMessage(e.message, lastUserMessage);
         } finally {
             // Re-enable sending
             isProcessing = false;
@@ -1164,6 +1173,93 @@ function initChat() {
             renderMessage(text, type);
         } else {
             renderMessage(text, type, new Date().toISOString());
+        }
+    }
+
+    // Add error message with retry button
+    function addErrorMessage(errorText, retryContext) {
+        const div = document.createElement('div');
+        div.className = 'etsy-ai-msg system error';
+
+        const errorContent = document.createElement('div');
+        errorContent.className = 'error-content';
+        errorContent.innerText = `Error: ${errorText}`;
+
+        if (retryContext) {
+            const retryBtn = document.createElement('button');
+            retryBtn.className = 'retry-btn';
+            retryBtn.innerHTML = '🔄';
+            retryBtn.setAttribute('data-ai-tooltip', 'Retry request');
+            retryBtn.onclick = (e) => handleRetry(retryContext, e);
+            errorContent.appendChild(retryBtn);
+        }
+
+        div.appendChild(errorContent);
+
+        const time = document.createElement('span');
+        time.className = 'etsy-ai-timestamp';
+        time.innerText = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        div.appendChild(time);
+
+        ELEMENTS.chatBox.appendChild(div);
+        ELEMENTS.chatBox.scrollTop = ELEMENTS.chatBox.scrollHeight;
+    }
+
+    // Handle retry button click
+    async function handleRetry(retryContext, event) {
+        if (!retryContext || isProcessing) return;
+
+        // Set processing state IMMEDIATELY to prevent race conditions
+        isProcessing = true;
+        ELEMENTS.sendBtn.disabled = true;
+        ELEMENTS.sendBtn.style.opacity = '0.5';
+        ELEMENTS.sendBtn.style.cursor = 'not-allowed';
+        ELEMENTS.generateBtn.disabled = true;
+        ELEMENTS.generateBtn.style.opacity = '0.5';
+
+        // Disable retry button during processing
+        if (event && event.target) {
+            event.target.disabled = true;
+            event.target.style.opacity = '0.5';
+        }
+
+        // Don't re-show user message - it's already in the chat from original attempt
+        // Just show loading and retry the API call
+        showLoadingDots();
+
+        try {
+            // Re-initialize AI service in case it was the issue
+            aiService = await window.AIServiceFactory.getCurrentService(retryContext.provider);
+
+            if (!aiService) {
+                throw new Error('Failed to initialize AI service');
+            }
+
+            // Rebuild conversation history with fresh context
+            const conversationHistory = await aiService.buildConversationHistory('global_chat', retryContext.text);
+            const { systemInstruction } = await aiService.constructPromptData(CURRENT_CONTEXT, retryContext.text);
+
+            // Update lastUserMessage with minimal context for potential next retry
+            lastUserMessage = {
+                text: retryContext.text,
+                provider: retryContext.provider,
+                modelId: retryContext.modelId,
+                apiKey: retryContext.apiKey
+            };
+
+            await streamAIResponse(retryContext.modelId, retryContext.apiKey, conversationHistory, systemInstruction);
+
+        } catch (e) {
+            removeLoadingMessage();
+            // Use retryContext (not lastUserMessage) to maintain original retry context
+            addErrorMessage(e.message, retryContext);
+        } finally {
+            isProcessing = false;
+            ELEMENTS.sendBtn.disabled = false;
+            ELEMENTS.sendBtn.style.opacity = '1';
+            ELEMENTS.sendBtn.style.cursor = 'pointer';
+            ELEMENTS.generateBtn.disabled = false;
+            ELEMENTS.generateBtn.style.opacity = '1';
         }
     }
 
