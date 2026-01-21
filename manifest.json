@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Etsy AI Assistant",
-  "version": "1.2.1",
+  "version": "1.3.0",
   "description": "AI assistant integrated into Etsy pages",
   "update_url": "https://gist.githubusercontent.com/Bl0ck154/0e625dc793f5e1fd799545bd0be42ae9/raw/updates.xml",
   "permissions": [
@@ -35,7 +35,6 @@
         "content/providers/deepseek_service.js",
         "content/providers/grok_service.js",
         "content/ai_service_factory.js",
-        "content/ai_service.js",
         "content/image_modal.js",
         "content/chat_manager.js",
         "content/content.js",

@@ -1,42 +1,40 @@
-// content.js
+// content.js - Lazy Context Parsing
+// Парсимо контекст ТІЛЬКИ коли потрібно (on-demand), не постійно у фоні
 
+// === CACHE MANAGEMENT ===
+let contextCache = null;
+let cacheTimestamp = 0;
+const CACHE_TTL = 5000; // 5 seconds
 
-let lastContext = null;
-let debounceTimer = null;
-let lastUrl = location.href;
-let lastBuyerId = null;
-let urlCheckInterval = null;
-let lastParsedHash = "";
 let chatManagerInitialized = false;
 
+function invalidateContextCache() {
+    contextCache = null;
+    cacheTimestamp = 0;
+}
 
-
-// 1. MAIN LOGIC
-function attemptExtraction() {
-    // 1. КРИТИЧНА ПЕРЕВІРКА: Чи живе розширення?
+// === CORE FUNCTION: Get Context with Cache ===
+function getContextWithCache() {
+    // 1. Check if extension is alive
     if (!chrome.runtime?.id) {
-        console.log('⛔ Extension context invalidated. Stopping script.');
-        // Вимикаємо все, щоб скрипт "помер" спокійно
-        if (typeof observer !== 'undefined') observer.disconnect();
-        if (urlCheckInterval) clearInterval(urlCheckInterval);
-        return;
+        console.log('⛔ Extension context invalidated. Cannot extract.');
+        return null;
     }
-    // Використовуємо новий PageParser для витягування контенту
+
+    // 2. Check cache
+    const now = Date.now();
+    if (contextCache && (now - cacheTimestamp) < CACHE_TTL) {
+        return contextCache;
+    }
+
+    // 3. Extract fresh context
     const pageData = window.PageParser ? window.PageParser.getFullPageData() : null;
 
     if (!pageData) {
-        console.log('🍬 Etsy AI: PageParser not ready or no content found');
-        return;
+        console.log('⚠️ PageParser not ready or no content found');
+        return null;
     }
 
-    const currentHash = pageData.title + pageData.markdown.length + pageData.markdown.slice(0, 50);
-    if (currentHash === lastParsedHash) {
-        // Ми нічого не логуємо, нічого не відправляємо. Тиша.
-        return;
-    }
-    lastParsedHash = currentHash;
-
-    // Створюємо контекст з повним контентом сторінки
     const data = {
         page_content: {
             title: pageData.title,
@@ -49,88 +47,49 @@ function attemptExtraction() {
         page_url: window.location.href
     };
 
-    const json = JSON.stringify(data);
+    // 4. Update cache
+    contextCache = data;
+    cacheTimestamp = now;
 
-    // Перевіряємо чи змінився контекст або URL
-    if (lastContext !== json || window.location.href !== lastUrl) {
-        lastContext = json;
-        lastUrl = window.location.href;
-        console.log('🍬 Etsy AI: Page content extracted');
-        console.log('📄 Title:', data.page_content.title);
-        console.log('📊 Markdown size:', data.page_content.markdown?.length || 0, 'chars');
-
-        try {
-            chrome.runtime.sendMessage({
-                type: "ETSY_DATA_PARSED",
-                payload: data
-            }, (response) => {
-                // Обробка асинхронної помилки (коли повідомлення пішло, але ніхто не відповів)
-                if (chrome.runtime.lastError) {
-                    const errorMsg = chrome.runtime.lastError.message;
-
-                    // Ігноруємо "port closed" - це нормально якщо background не слухає
-                    if (errorMsg.includes("message port closed")) {
-                        // Тихо ігноруємо - background може не відповідати
-                        return;
-                    }
-
-                    // Якщо контекст втрачено - зупиняємось
-                    if (errorMsg.includes("context invalidated")) {
-                        console.warn("⚠️ Extension context invalidated");
-                        if (typeof observer !== 'undefined') observer.disconnect();
-                        if (urlCheckInterval) clearInterval(urlCheckInterval);
-                    }
-                }
-            });
-        } catch (error) {
-            // Обробка синхронної помилки (якщо розширення вмерло прямо перед викликом)
-            console.warn("⚠️ Extension context invalidated inside catch. Stopping.");
-            if (typeof observer !== 'undefined') observer.disconnect();
-            if (urlCheckInterval) clearInterval(urlCheckInterval);
-        }
-    }
+    return data;
 }
 
-// 2. SPA Handling + URL Change Detection
-const observer = new MutationObserver((mutations) => {
-    // Додаткова перевірка перед запуском таймера
-    if (!chrome.runtime?.id) {
-        observer.disconnect();
-        return;
-    }
-
-    if (debounceTimer) clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(() => {
-        attemptExtraction();
-    }, 1000);
+// === NAVIGATION EVENT LISTENERS (Cache Invalidation) ===
+window.addEventListener('popstate', () => {
+    invalidateContextCache();
 });
 
-observer.observe(document.body, {
-    childList: true,
-    subtree: true,
-    attributes: true, // Also watch for attribute changes
-    attributeFilter: ['class', 'data-region'] // Watch specific attributes
+window.addEventListener('hashchange', () => {
+    invalidateContextCache();
 });
 
-urlCheckInterval = setInterval(() => {
-    if (!chrome.runtime?.id) {
-        clearInterval(urlCheckInterval);
-        return;
-    }
-
-    if (location.href !== lastUrl) {
-        lastUrl = location.href;
-        console.log('🍬 Etsy AI: URL changed, re-extracting...');
-        attemptExtraction();
-    }
-}, 500);
-
-// 3. Listeners
+// === MESSAGE LISTENERS ===
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    // On-demand context request
+    if (request.action === "GET_FRESH_CONTEXT") {
+        const context = getContextWithCache();
+        sendResponse({ context: context });
+        return true; // Keep channel open for async
+    }
+
+    // Legacy refresh support (now does the same as GET_FRESH_CONTEXT)
     if (request.action === "refresh_context") {
-        window.postMessage({ type: "GET_ETSY_CONTEXT" }, "*");
-        attemptExtraction();
-        sendResponse({ status: "Refreshed" });
+        const context = getContextWithCache();
+
+        // Also send to background for storage (legacy compatibility)
+        if (context) {
+            chrome.runtime.sendMessage({
+                type: "ETSY_DATA_PARSED",
+                payload: context
+            }, () => {
+                if (chrome.runtime.lastError) {
+                    // Ignore - background may not be listening
+                }
+            });
+        }
+
+        sendResponse({ status: "Refreshed", context: context });
+        return true;
     }
 
     // Handle Chat Manager toggle from options page
@@ -140,24 +99,17 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
 });
 
-window.addEventListener("message", (event) => {
-    if (event.source !== window) return;
-    // Removed old Etsy.Context handling - now using PageParser
-});
-
-// --- CHAT MANAGER INTEGRATION ---
+// === CHAT MANAGER INTEGRATION ===
 function toggleChatManager(enabled) {
     if (enabled && !chatManagerInitialized) {
         if (window.EtsyChatManager) {
             window.EtsyChatManager.init();
             chatManagerInitialized = true;
-            console.log('✅ Chat Manager enabled');
         }
     } else if (!enabled && chatManagerInitialized) {
         if (window.EtsyChatManager) {
             window.EtsyChatManager.cleanup();
             chatManagerInitialized = false;
-            console.log('🛑 Chat Manager disabled');
         }
     }
 }
@@ -165,7 +117,6 @@ function toggleChatManager(enabled) {
 // Initialize Chat Manager on load if enabled
 chrome.storage.sync.get(['chatManagerEnabled'], (result) => {
     const isEnabled = result.chatManagerEnabled !== undefined ? result.chatManagerEnabled : true;
-    console.log('🎨 Chat Manager setting:', isEnabled);
 
     if (isEnabled) {
         // Wait for EtsyChatManager to be available
@@ -180,6 +131,7 @@ chrome.storage.sync.get(['chatManagerEnabled'], (result) => {
     }
 });
 
-// --- HELPERS ---
-// Old parsing functions removed - now using PageParser module
+// === EXPORT FOR CHAT_UI ===
+// Export function globally so chat_ui.js can call it directly
+window.EtsyAI_GetFreshContext = getContextWithCache;
 

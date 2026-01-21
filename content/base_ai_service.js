@@ -36,9 +36,6 @@ ${pageContent.markdown ? `\n\nPAGE CONTENT:\n${pageContent.markdown}` : ''}`;
                 const result = await chrome.storage.local.get(['custom_instructions']);
                 if (result.custom_instructions && result.custom_instructions.trim()) {
                     instruction = result.custom_instructions;
-                    console.log('📝 Using custom instructions from storage');
-                } else {
-                    console.log('📝 Using default base instructions');
                 }
             } catch (error) {
                 console.warn('Failed to load custom instructions, using default:', error);

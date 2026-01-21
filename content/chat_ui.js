@@ -524,7 +524,6 @@ function initChat() {
             if (selectedModel) {
                 ELEMENTS.modelSelect.value = selectedModel;
                 await safeStorageSet({ 'preferred_model': selectedModel });
-                console.log("✅ Set default model:", selectedModel);
             }
         }
 
@@ -897,6 +896,18 @@ function initChat() {
         const loadingMsgId = showLoadingDots();
 
         try {
+            // ===== REQUEST FRESH CONTEXT ON-DEMAND =====
+            if (window.EtsyAI_GetFreshContext) {
+                const freshContext = window.EtsyAI_GetFreshContext();
+                if (freshContext) {
+                    CURRENT_CONTEXT = freshContext;
+                } else {
+                    console.warn('⚠️ Failed to extract fresh context');
+                }
+            } else {
+                console.error('⚠️ EtsyAI_GetFreshContext not available - content.js may not be loaded yet');
+            }
+
             // Get AI service instance for the SPECIFIC provider of selected model
             // This ensures we use the correct API (Gemini/DeepSeek/Grok) for the selected model
             aiService = await window.AIServiceFactory.getCurrentService(provider);
@@ -1252,7 +1263,6 @@ function initChat() {
                     if (userMessages.length === 1 && aiMessages.length === 1) {
                         // Use first words from AI response as title
                         currentChatTitle = createFallbackTitle(aiMessages[0].text);
-                        console.log('✅ Chat title cached:', currentChatTitle);
                     }
                 }
             }

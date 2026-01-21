@@ -102,7 +102,9 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for detailed technical documentation.
 **Key Components:**
 - `content/content.js` - Page content extraction
 - `content/chat_ui.js` - Floating chat interface
-- `content/ai_service.js` - Gemini AI integration
+- `content/base_ai_service.js` - Base abstract class for AI providers
+- `content/ai_service_factory.js` - Factory for selecting AI providers
+- `content/providers/` - AI service implementations (Gemini, DeepSeek, Grok)
 - `content/page_parser.js` - HTML to Markdown conversion
 - `background/service_worker.js` - Background context storage
 
@@ -122,15 +124,14 @@ ChromeExtensionEtsyAI/
 │   ├── chat_ui.css        # Chat styling
 │   ├── image_modal.css    # Image modal styling
 │   ├── image_modal.js     # Image download modal
-│   ├── ai_service.js      # AI API integration
 │   ├── chat_manager.js    # Chat history management
 │   ├── page_parser.js     # Page content extraction
+│   ├── base_ai_service.js      # Base AI service (abstract class)
+│   ├── ai_service_factory.js   # AI provider factory
 │   ├── providers/         # AI service providers
 │   │   ├── gemini_service.js   # Google Gemini AI
 │   │   ├── deepseek_service.js # DeepSeek AI
 │   │   └── grok_service.js     # Grok AI
-│   ├── ai_service_factory.js   # AI provider factory
-│   ├── base_ai_service.js      # Base AI service class
 │   └── ui.html            # Chat HTML template
 └── libs/
     ├── Readability.min.js # Mozilla Readability
