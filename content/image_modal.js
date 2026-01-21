@@ -14,7 +14,7 @@
             createModal();
             attachImageInterceptors();
             attachDownloadAllButtons();
-            console.log('🖼️ Image Modal: Initialized');
+            //            console.log('🖼️ Image Modal: Initialized');
         },
 
         cleanup: function () {
@@ -22,7 +22,7 @@
                 modalElement.parentNode.removeChild(modalElement);
                 modalElement = null;
             }
-            console.log('🖼️ Image Modal: Cleaned up');
+            //            console.log('🖼️ Image Modal: Cleaned up');
         }
     };
 

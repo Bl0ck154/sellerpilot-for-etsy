@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Etsy AI Assistant",
-  "version": "1.3.0",
+  "version": "1.3.7",
   "description": "AI assistant integrated into Etsy pages",
   "update_url": "https://gist.githubusercontent.com/Bl0ck154/0e625dc793f5e1fd799545bd0be42ae9/raw/updates.xml",
   "permissions": [
@@ -10,7 +10,8 @@
     "tabs",
     "storage",
     "downloads",
-    "alarms"
+    "alarms",
+    "offscreen"
   ],
   "host_permissions": [
     "https://www.etsy.com/*"
@@ -30,6 +31,8 @@
         "libs/Readability.min.js",
         "libs/turndown.js",
         "content/page_parser.js",
+        "content/link_discovery.js",
+        "content/listing_editor_tracker.js",
         "content/base_ai_service.js",
         "content/providers/gemini_service.js",
         "content/providers/deepseek_service.js",

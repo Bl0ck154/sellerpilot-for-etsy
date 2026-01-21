@@ -45,7 +45,113 @@ ${pageContent.markdown ? `\n\nPAGE CONTENT:\n${pageContent.markdown}` : ''}`;
             const metadata = context.metadata || {};
             const pageContext = this.getPageContext(pageContent, metadata);
 
-            return `${instruction}${pageContext}`;
+            // Get RAG context from parsed listings (non-blocking read)
+            const ragContext = await this.getRAGContext();
+
+            return `${instruction}${pageContext}${ragContext}`;
+        },
+
+        /**
+         * Load parsed listing context from local storage
+         * Scans current chat DOM to determine order, then looks up cached data
+         * @returns {Promise<string>} Formatted context string or empty
+         */
+        async getRAGContext() {
+            try {
+                // Only on messages pages
+                if (!window.location.pathname.startsWith('/messages')) {
+                    return '';
+                }
+
+                // 1. Scan current chat DOM for listing links (in order)
+                const listingUrls = this.scanCurrentChatForListings();
+
+                if (listingUrls.length === 0) {
+                    return '';
+                }
+
+                // 2. Load all cached listings
+                const items = await chrome.storage.local.get(null);
+                const TTL_24_HOURS = 24 * 60 * 60 * 1000;
+                const now = Date.now();
+                const expiredKeys = [];
+
+                // 3. Find first listing from DOM that exists in cache
+                for (const url of listingUrls) {
+                    const listingId = url.match(/\/listing\/(\d+)/)?.[1];
+                    if (!listingId) continue;
+
+                    const storageKey = `RAG_LISTING_${listingId}`;
+                    const cached = items[storageKey];
+
+                    if (!cached || !cached.title) continue;
+
+                    // Check TTL
+                    const age = now - (cached.timestamp || 0);
+                    if (age > TTL_24_HOURS) {
+                        expiredKeys.push(storageKey);
+                        continue;
+                    }
+
+                    // Found first valid cached listing!
+                    let context = '\n\n### PRODUCT CONTEXT (from discussed listing):\n';
+                    context += `\n**${cached.title}**\n`;
+                    context += `URL: ${cached.url}\n`;
+
+                    if (cached.description) {
+                        const desc = cached.description.length > 800
+                            ? cached.description.substring(0, 800) + '...'
+                            : cached.description;
+                        context += `Description: ${desc}\n`;
+                    }
+
+                    if (cached.personalization) {
+                        context += `Customer Personalization/Instructions: ${cached.personalization}\n`;
+                    }
+
+                    // Clean up expired entries
+                    if (expiredKeys.length > 0) {
+                        chrome.storage.local.remove(expiredKeys);
+                    }
+
+                    return context;
+                }
+
+                // Clean up expired even if no valid listing found
+                if (expiredKeys.length > 0) {
+                    chrome.storage.local.remove(expiredKeys);
+                }
+
+                return '';
+            } catch (error) {
+                console.warn('⚠️ RAG: Failed to load context:', error);
+                return '';
+            }
+        },
+
+        /**
+         * Scan current chat DOM for listing URLs in order
+         * @returns {string[]} Array of listing URLs in DOM order
+         */
+        scanCurrentChatForListings() {
+            const urls = [];
+            const links = document.querySelectorAll('a[href*="/listing/"]');
+
+            links.forEach(link => {
+                const href = link.href || link.getAttribute('href');
+                if (!href) return;
+
+                const match = href.match(/\/listing\/(\d+)/);
+                if (match) {
+                    const url = `https://www.etsy.com/listing/${match[1]}`;
+                    // Deduplicate
+                    if (!urls.includes(url)) {
+                        urls.push(url);
+                    }
+                }
+            });
+
+            return urls;
         }
     };
 

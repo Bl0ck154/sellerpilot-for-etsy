@@ -78,7 +78,7 @@ chrome.alarms.create('checkManifestUpdate', {
 // Обробник для alarm
 chrome.alarms.onAlarm.addListener((alarm) => {
     if (alarm.name === 'checkManifestUpdate') {
-        console.log('⏰ Alarm triggered: перевірка оновлень...');
+
         checkForManifestUpdate();
     }
 });
@@ -112,11 +112,100 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 console.error('Download failed:', chrome.runtime.lastError);
                 sendResponse({ success: false, error: chrome.runtime.lastError.message });
             } else {
-                console.log('✅ Download started:', filename);
+
                 sendResponse({ success: true, downloadId: downloadId });
             }
         });
 
         return true; // Keep message channel open for async response
     }
+
+    // ============================================
+    // RAG Context Parsing - Offscreen Document Coordination
+    // ============================================
+
+    if (message.type === 'PARSE_LISTING_HTML') {
+        (async () => {
+            try {
+                // Ensure offscreen document exists
+                await ensureOffscreenDocument();
+
+                // Send HTML to offscreen for parsing
+                const response = await chrome.runtime.sendMessage({
+                    target: 'offscreen',
+                    type: 'PARSE_LISTING_HTML',
+                    html: message.html,
+                    url: message.url
+                });
+
+                // Store parsed data in local storage with RAG prefix
+                if (response && response.success) {
+                    // Extract listing ID for storage key
+                    const match = message.url.match(/\/listing\/(\d+)/);
+                    const storageKey = match
+                        ? `RAG_LISTING_${match[1]}`
+                        : `RAG_LISTING_${btoa(message.url).substring(0, 20)}`;
+
+                    // Add metadata for TTL
+                    const dataToStore = {
+                        ...response,
+                        storageKey: storageKey,
+                        timestamp: Date.now() // TTL: for auto-cleanup after 24 hours
+                    };
+
+                    await chrome.storage.local.set({ [storageKey]: dataToStore });
+
+
+                }
+
+                sendResponse({ success: true, data: response });
+            } catch (error) {
+                console.error('🔴 RAG: Parse failed:', error);
+                sendResponse({ success: false, error: error.message });
+            }
+        })();
+        return true; // Keep channel open for async
+    }
 });
+
+// ============================================
+// Offscreen Document Management
+// ============================================
+
+let offscreenDocumentCreated = false;
+
+/**
+ * Ensure the offscreen document exists for HTML parsing
+ */
+async function ensureOffscreenDocument() {
+    if (offscreenDocumentCreated) {
+        return;
+    }
+
+    // Check if already exists
+    const existingContexts = await chrome.runtime.getContexts({
+        contextTypes: ['OFFSCREEN_DOCUMENT']
+    });
+
+    if (existingContexts.length > 0) {
+        offscreenDocumentCreated = true;
+        return;
+    }
+
+    // Create new offscreen document
+    try {
+        await chrome.offscreen.createDocument({
+            url: 'offscreen/offscreen.html',
+            reasons: ['DOM_PARSER'],
+            justification: 'Parse listing HTML to extract product data for AI context'
+        });
+        offscreenDocumentCreated = true;
+        console.log('🟢 RAG: Offscreen document created');
+    } catch (error) {
+        if (error.message.includes('already exists')) {
+            offscreenDocumentCreated = true;
+        } else {
+            throw error;
+        }
+    }
+}
