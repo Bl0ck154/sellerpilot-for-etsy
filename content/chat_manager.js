@@ -18,6 +18,10 @@
     let draftCleanerAttached = false;
     let lastParsedHash = "";
 
+    // Attachments viewer state
+    let lastAttachmentsConvoId = null;
+    let lastAttachmentsHash = null;
+
     // Module API
     window.EtsyChatManager = {
         init: function () {
@@ -76,6 +80,8 @@
             // Reset state
             draftCleanerAttached = false;
             lastParsedHash = "";
+            lastAttachmentsConvoId = null;
+            lastAttachmentsHash = null;
             isInitialized = false;
         },
 
@@ -401,8 +407,257 @@
 
         draftCleanerAttached = false;
 
+        // Clean up attachments viewer
+        const attachmentsViewer = document.getElementById('etsy-ai-attachments-viewer');
+        if (attachmentsViewer) {
+            attachmentsViewer.remove();
+        }
+        lastAttachmentsConvoId = null;
+        lastAttachmentsHash = null;
+
         document.body.classList.add('ecm-list-mode');
         document.documentElement.classList.add('ecm-list-mode');
+    }
+
+    // === ATTACHMENTS VIEWER ===
+
+    /**
+     * Extract attachments from chat history
+     * @param {Object} chatHistory - Chat history object from storage
+     * @returns {Array} Array of {id, url, thumb_url}
+     */
+    function extractAttachments(chatHistory) {
+        if (!chatHistory?.messages) return [];
+
+        const attachments = [];
+        const seenIds = new Set();
+
+        for (const msg of chatHistory.messages) {
+            // Method 1: Full history attachments (from mission-control API)
+            if (msg.attachments?.length > 0) {
+                for (const att of msg.attachments) {
+                    const id = att.convo_message_attachment_id || att.attachment_id;
+                    if (id && !seenIds.has(id)) {
+                        attachments.push({
+                            id: id,
+                            url: att.url,
+                            thumb_url: att.thumb_url
+                        });
+                        seenIds.add(id);
+                    }
+                }
+            }
+
+            // Method 2: Fallback images array (from pagination API)
+            if (msg.images?.length > 0) {
+                for (const img of msg.images) {
+                    const id = img.image_id;
+                    if (id && !seenIds.has(id)) {
+                        const thumb = img.image_data?.sources?.find(s => s.width === 75);
+                        attachments.push({
+                            id: id,
+                            url: img.image_data.url,
+                            thumb_url: thumb?.url || img.image_data.url
+                        });
+                        seenIds.add(id);
+                    }
+                }
+            }
+        }
+
+        return attachments;
+    }
+
+    /**
+     * Create HTML for attachments accordion
+     */
+    function createAttachmentsHTML(attachments) {
+        const count = attachments.length;
+        const toggleId = `wt-content-toggle-${Math.random().toString(36).substring(7)}`;
+
+        let gridItems = '';
+        for (const att of attachments) {
+            gridItems += `
+                <div class="wt-grid__item-xs-4 wt-display-flex-xs wt-justify-content-center">
+                    <a href="${att.url}" 
+                       class="wt-transparent-card etsy-ai-attachment-link" 
+                       data-image-url="${att.url}"
+                       data-attachment-id="${att.id}">
+                        <img src="${att.thumb_url}" 
+                             alt="Attachment ${att.id}" 
+                             class="grid-image">
+                    </a>
+                </div>
+            `;
+        }
+
+        return `
+            <div data-clg-id="WtAccordion">
+                <button type="button" 
+                        aria-controls="${toggleId}" 
+                        aria-expanded="false" 
+                        data-clg-id="WtButton" 
+                        class="wt-btn wt-btn--transparent wt-btn--transparent-flush-left wt-content-toggle--btn wt-content-toggle--with-icon wt-content-toggle--full-width wt-content-toggle--flush">
+                    <span class="wt-flex-xs-auto wt-width-full">
+                        <div class="wt-display-flex-xs wt-justify-content-space-between wt-align-items-center">
+                            <h3 class="wt-text-caption-title">Attached files</h3>
+                            <h3 class="wt-text-caption wt-ml-xs-1">${count}</h3>
+                        </div>
+                    </span>
+                    <span aria-hidden="true" class="wt-content-toggle--btn__icon"></span>
+                </button>
+                <div id="${toggleId}" 
+                     aria-hidden="true" 
+                     class="wt-content-toggle__body" 
+                     style="max-height: 0px;" 
+                     tabindex="-1">
+                    <div class="wt-pt-xs-1">
+                        <div class="wt-mt-xs-1 wt-grid wt-grid--block wt-horizontal-center listing-grid">
+                            ${gridItems}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    /**
+     * Attach accordion toggle listeners
+     */
+    function attachAccordionListeners(container) {
+        const button = container.querySelector('button[aria-controls]');
+        if (!button) return;
+
+        const targetId = button.getAttribute('aria-controls');
+        const body = document.getElementById(targetId);
+        if (!body) return;
+
+        button.addEventListener('click', () => {
+            const isExpanded = button.getAttribute('aria-expanded') === 'true';
+
+            if (isExpanded) {
+                button.setAttribute('aria-expanded', 'false');
+                body.setAttribute('aria-hidden', 'true');
+                body.style.maxHeight = '0px';
+            } else {
+                button.setAttribute('aria-expanded', 'true');
+                body.setAttribute('aria-hidden', 'false');
+                body.style.maxHeight = body.scrollHeight + 'px';
+            }
+        });
+    }
+
+    /**
+     * Attach image click listeners for lightbox
+     */
+    function attachImageListeners(container) {
+        const links = container.querySelectorAll('.etsy-ai-attachment-link');
+
+        links.forEach(link => {
+            link.addEventListener('click', (e) => {
+                e.preventDefault();
+                const imageUrl = link.dataset.imageUrl;
+
+                // Use existing EtsyImageModal if available
+                if (window.EtsyImageModal) {
+                    window.EtsyImageModal.showImage(imageUrl);
+                } else {
+                    // Fallback: open in new tab
+                    window.open(imageUrl, '_blank');
+                }
+            });
+        });
+    }
+
+    /**
+     * Inject attachments viewer into right column
+     * OPTIMIZED: Single storage call, caching, deduplication
+     */
+    async function injectAttachmentsViewer() {
+        // Only on chat page
+        if (!/\/messages\/\d+/.test(window.location.pathname)) {
+            return;
+        }
+
+        // Get current conversation ID
+        const match = window.location.pathname.match(/\/messages\/(\d+)/);
+        const currentConvoId = match ? match[1] : null;
+        if (!currentConvoId) return;
+
+        // Find right column
+        const rightCol = document.querySelector('.my-col-right');
+        if (!rightCol) return;
+
+        // Check extension context
+        if (!chrome.runtime?.id) {
+            return;
+        }
+
+        try {
+            // OPTIMIZATION: Single storage call
+            const result = await chrome.storage.local.get(['ETSY_CHAT_HISTORY']);
+            const chatHistory = result.ETSY_CHAT_HISTORY;
+
+            // No chat history - remove viewer if exists
+            if (!chatHistory?.messages) {
+                const existingViewer = document.getElementById('etsy-ai-attachments-viewer');
+                if (existingViewer) {
+                    existingViewer.remove();
+                    lastAttachmentsConvoId = null;
+                    lastAttachmentsHash = null;
+                }
+                return;
+            }
+
+            // Check if this is for current conversation
+            if (chatHistory.convo_id !== currentConvoId) {
+                return; // Stale data
+            }
+
+            // Extract attachments
+            const attachments = extractAttachments(chatHistory);
+
+            // Create hash for change detection
+            const attachmentsHash = attachments.map(a => a.id).join(',');
+
+            // OPTIMIZATION: Skip if nothing changed
+            if (currentConvoId === lastAttachmentsConvoId && attachmentsHash === lastAttachmentsHash) {
+                return; // No changes
+            }
+
+            // Update cache
+            lastAttachmentsConvoId = currentConvoId;
+            lastAttachmentsHash = attachmentsHash;
+
+            // Remove existing viewer
+            const existingViewer = document.getElementById('etsy-ai-attachments-viewer');
+            if (existingViewer) {
+                existingViewer.remove();
+            }
+
+            // No attachments - don't create viewer
+            if (attachments.length === 0) {
+                return;
+            }
+
+            // Create and inject viewer
+            const viewerHtml = createAttachmentsHTML(attachments);
+
+            const container = document.createElement('div');
+            container.id = 'etsy-ai-attachments-viewer';
+            container.className = 'wt-mt-xs-2 wt-mb-xs-2 wt-pl-xs-3 wt-pr-xs-3 wt-pl-md-1 wt-pr-md-1';
+            container.innerHTML = viewerHtml;
+
+            // Insert at end of right column (after other elements)
+            rightCol.appendChild(container);
+
+            // Attach event listeners
+            attachAccordionListeners(container);
+            attachImageListeners(container);
+
+        } catch (error) {
+            console.warn('⚠️ Chat Manager: Failed to inject attachments viewer:', error);
+        }
     }
 
     function loop() {
@@ -515,6 +770,9 @@
 
             setupDraftCleaner();
         }
+
+        // Inject attachments viewer (optimized with caching)
+        injectAttachmentsViewer();
     }
 
     function createLeftResizer(parent) {

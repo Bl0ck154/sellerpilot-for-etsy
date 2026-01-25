@@ -113,9 +113,35 @@ AI: ${aiResponse}`;
      * @returns {Promise<string>} The complete generated text.
      */
     async streamMessage({ modelId, apiKey, messages, systemInstruction, onChunk, onComplete, onError }) {
+        const maxRetries = 2; // One automatic retry
+        let lastError = null;
+
+        for (let attempt = 0; attempt <= maxRetries; attempt++) {
+            try {
+                return await this._streamMessageInternal({ modelId, apiKey, messages, systemInstruction, onChunk, onComplete, onError, attempt });
+            } catch (error) {
+                lastError = error;
+
+                // Check if it's a 503 overloaded error
+                const isOverloaded = error.message && error.message.includes('overloaded');
+
+                if (isOverloaded && attempt < maxRetries) {
+                    console.log(`🔄 Gemini overloaded (503), retrying in 1s... (attempt ${attempt + 1}/${maxRetries + 1})`);
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    continue; // Retry
+                }
+
+                // If not retryable or last attempt, throw
+                throw error;
+            }
+        }
+
+        throw lastError;
+    }
+
+    async _streamMessageInternal({ modelId, apiKey, messages, systemInstruction, onChunk, onComplete, onError, attempt = 0 }) {
         const url = `${this.getApiEndpoint()}${modelId}:streamGenerateContent?alt=sse`;
 
-        // Convert messages to Gemini format
         const contents = this._formatMessagesForGemini(messages);
 
         const payload = {
@@ -145,7 +171,7 @@ AI: ${aiResponse}`;
             }
 
             let fullText = '';
-            let buffer = ''; // Buffer для incomplete chunks
+            let buffer = '';
             const reader = response.body.getReader();
             const decoder = new TextDecoder();
 
@@ -156,7 +182,6 @@ AI: ${aiResponse}`;
                 buffer += decoder.decode(value, { stream: true });
                 const lines = buffer.split('\n');
 
-                // Last line може бути неповним
                 buffer = lines.pop() || '';
 
                 for (const line of lines) {
@@ -183,8 +208,9 @@ AI: ${aiResponse}`;
             return fullText;
 
         } catch (error) {
-            console.error('Gemini Stream Error:', error);
-            if (onError) onError(error);
+            if (onError && attempt >= 1) { // Only call onError on final attempt
+                onError(error);
+            }
             throw error;
         }
     }

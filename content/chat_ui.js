@@ -914,8 +914,6 @@ function initChat() {
         const selectedOption = ELEMENTS.modelSelect.options[ELEMENTS.modelSelect.selectedIndex];
         const provider = selectedOption ? selectedOption.dataset.provider : "gemini";
 
-        console.log('🎯 Selected model:', modelId, 'Provider:', provider);
-
         // Get API key for the provider
         try {
             const apiKey = await window.AIServiceFactory.getApiKey(provider);

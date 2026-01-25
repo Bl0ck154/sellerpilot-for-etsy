@@ -48,12 +48,14 @@ ${pageContent.markdown ? `\n\nPAGE CONTENT:\n${pageContent.markdown}` : ''}`;
             // Get RAG context from parsed listings (non-blocking read)
             const ragContext = await this.getRAGContext();
 
-            return `${instruction}${pageContext}${ragContext}`;
+            // Get chat history context from Etsy conversation
+            const chatHistoryContext = await this.getChatHistoryContext();
+
+            return `${instruction}${pageContext}${ragContext}${chatHistoryContext}`;
         },
 
         /**
-         * Load parsed listing context from local storage
-         * Scans current chat DOM to determine order, then looks up cached data
+         * Get RAG context from cached listings
          * @returns {Promise<string>} Formatted context string or empty
          */
         async getRAGContext() {
@@ -63,25 +65,44 @@ ${pageContent.markdown ? `\n\nPAGE CONTENT:\n${pageContent.markdown}` : ''}`;
                     return '';
                 }
 
-                // 1. Scan current chat DOM for listing links (in order)
-                const listingUrls = this.scanCurrentChatForListings();
+                // 1. Try to get current listing ID from storage (set by etsy_context_interceptor)
+                let listingId = null;
 
-                if (listingUrls.length === 0) {
+                if (chrome.runtime?.id) {
+                    try {
+                        const result = await chrome.storage.local.get(['ETSY_CURRENT_LISTING_ID']);
+                        listingId = result.ETSY_CURRENT_LISTING_ID;
+                    } catch (e) {
+                        // Ignore error, fallback to DOM scanning
+                    }
+                }
+
+                // 2. Fallback: Scan DOM for listing links if no listing_id in storage
+                let listingIds = [];
+
+                if (listingId) {
+                    listingIds.push(listingId);
+                } else {
+                    const listingUrls = this.scanCurrentChatForListings();
+                    for (const url of listingUrls) {
+                        const id = url.match(/\/listing\/(\d+)/)?.[1];
+                        if (id) listingIds.push(id);
+                    }
+                }
+
+                if (listingIds.length === 0) {
                     return '';
                 }
 
-                // 2. Load all cached listings
+                // 3. Load all cached listings
                 const items = await chrome.storage.local.get(null);
                 const TTL_24_HOURS = 24 * 60 * 60 * 1000;
                 const now = Date.now();
                 const expiredKeys = [];
 
-                // 3. Find first listing from DOM that exists in cache
-                for (const url of listingUrls) {
-                    const listingId = url.match(/\/listing\/(\d+)/)?.[1];
-                    if (!listingId) continue;
-
-                    const storageKey = `RAG_LISTING_${listingId}`;
+                // 4. Find first listing that exists in cache
+                for (const id of listingIds) {
+                    const storageKey = `RAG_LISTING_${id}`;
                     const cached = items[storageKey];
 
                     if (!cached || !cached.title) continue;
@@ -218,6 +239,59 @@ ${pageContent.markdown ? `\n\nPAGE CONTENT:\n${pageContent.markdown}` : ''}`;
             }
 
             return []; // No listings found at all
+        },
+
+        /**
+         * Load chat history context from Etsy conversation
+         * Uses data extracted by EtsyContextInterceptor
+         * @returns {Promise<string>} Formatted chat history or empty string
+         */
+        async getChatHistoryContext() {
+            try {
+                // Check extension context first
+                if (!chrome.runtime?.id) {
+                    return '';
+                }
+
+                // Only on specific message conversation pages
+                if (!/^\/messages\/\d+/.test(window.location.pathname)) {
+                    return '';
+                }
+
+                const result = await chrome.storage.local.get(['ETSY_CHAT_HISTORY']);
+                const chatHistory = result.ETSY_CHAT_HISTORY;
+
+                if (!chatHistory?.messages?.length) {
+                    return '';
+                }
+
+                // Check if this is for the current conversation
+                const currentConvoId = window.location.pathname.match(/\/messages\/(\d+)/)?.[1];
+                if (chatHistory.convo_id && chatHistory.convo_id !== currentConvoId) {
+                    return ''; // Stale data from different conversation
+                }
+
+                let context = '\n\n### CUSTOMER CONVERSATION HISTORY:\n';
+                context += '(Messages between you and the customer, from oldest to newest)\n\n';
+
+                for (const msg of chatHistory.messages) {
+                    const sender = msg.sender_display_name || `User ${msg.sender_user_id || msg.sender_id}` || 'Unknown';
+                    const text = msg.message_body || msg.message || '';
+                    const date = msg.create_date ? new Date(msg.create_date * 1000).toLocaleString() : '';
+
+                    context += `[${sender}]${date ? ` (${date})` : ''}: ${text}\n`;
+
+                    // Include attachment info if present
+                    if (msg.attachments?.length > 0) {
+                        context += `  📎 ${msg.attachments.length} attachment(s)\n`;
+                    }
+                }
+
+                return context;
+            } catch (error) {
+                console.warn('⚠️ getChatHistoryContext: Failed to load:', error);
+                return '';
+            }
         }
     };
 
