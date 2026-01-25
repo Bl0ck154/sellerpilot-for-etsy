@@ -100,15 +100,19 @@ class AIServiceFactory {
     static async getApiKey(providerId) {
         // Check extension context before storage access
         if (!AIServiceFactory.isExtensionContextValid()) {
+            console.warn('⚠️ Extension context invalid when getting API key for:', providerId);
             return null;
         }
 
         try {
             const storageKey = `${providerId}_api_key`;
             const result = await chrome.storage.local.get([storageKey]);
-            return result[storageKey] || null;
+            const apiKey = result[storageKey] || null;
+            console.log(`🔑 API key for ${providerId}:`, apiKey ? `${apiKey.substring(0, 10)}...` : 'NOT FOUND');
+            return apiKey;
         } catch (e) {
             if (e.message.includes('Extension context invalidated')) {
+                console.error('⚠️ Extension context invalidated when getting API key for:', providerId);
                 return null;
             }
             throw e;

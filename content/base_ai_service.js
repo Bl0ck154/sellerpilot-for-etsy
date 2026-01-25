@@ -58,8 +58,8 @@ ${pageContent.markdown ? `\n\nPAGE CONTENT:\n${pageContent.markdown}` : ''}`;
          */
         async getRAGContext() {
             try {
-                // Only on messages pages
-                if (!window.location.pathname.startsWith('/messages')) {
+                // Only on specific message conversation pages: /messages/{conversation_id}
+                if (!/^\/messages\/\d+/.test(window.location.pathname)) {
                     return '';
                 }
 
@@ -94,19 +94,18 @@ ${pageContent.markdown ? `\n\nPAGE CONTENT:\n${pageContent.markdown}` : ''}`;
                     }
 
                     // Found first valid cached listing!
-                    let context = '\n\n### PRODUCT CONTEXT (from discussed listing):\n';
+                    let context = '\n\n### PRODUCT CONTEXT (Etsy listing description):\n';
                     context += `\n**${cached.title}**\n`;
-                    context += `URL: ${cached.url}\n`;
-
-                    if (cached.description) {
-                        const desc = cached.description.length > 800
-                            ? cached.description.substring(0, 800) + '...'
-                            : cached.description;
-                        context += `Description: ${desc}\n`;
-                    }
 
                     if (cached.personalization) {
-                        context += `Customer Personalization/Instructions: ${cached.personalization}\n`;
+                        context += `Personalization field (for buyer): ${cached.personalization}\n`;
+                    }
+
+                    if (cached.description) {
+                        const desc = cached.description.length > 4000
+                            ? cached.description.substring(0, 4000) + '...'
+                            : cached.description;
+                        context += `Description: ${desc}\n`;
                     }
 
                     // Clean up expired entries
@@ -130,28 +129,95 @@ ${pageContent.markdown ? `\n\nPAGE CONTENT:\n${pageContent.markdown}` : ''}`;
         },
 
         /**
-         * Scan current chat DOM for listing URLs in order
-         * @returns {string[]} Array of listing URLs in DOM order
+         * Scan current chat DOM for listing URLs WITH PRIORITY
+         * Priority order:
+         * 1. Chat window messages (highest)
+         * 2. "Most recent order" section (.latest-order-module)
+         * 3. "Order history" section
+         * 4. "Favorited items" section (lowest)
+         * 
+         * @returns {string[]} Array with single highest-priority listing URL, or empty
          */
         scanCurrentChatForListings() {
-            const urls = [];
-            const links = document.querySelectorAll('a[href*="/listing/"]');
+            // Priority 1: Chat window messages
+            const chatContainer = document.querySelector('[data-appears-component-name*="message"]')
+                || document.querySelector('.wt-conversation-message')
+                || document.querySelector('.message-container');
 
-            links.forEach(link => {
-                const href = link.href || link.getAttribute('href');
-                if (!href) return;
-
-                const match = href.match(/\/listing\/(\d+)/);
-                if (match) {
-                    const url = `https://www.etsy.com/listing/${match[1]}`;
-                    // Deduplicate
-                    if (!urls.includes(url)) {
-                        urls.push(url);
+            if (chatContainer) {
+                const chatLinks = chatContainer.querySelectorAll('a[href*="/listing/"]');
+                for (const link of chatLinks) {
+                    const href = link.href || link.getAttribute('href');
+                    const match = href?.match(/\/listing\/(\d+)/);
+                    if (match) {
+                        const url = `https://www.etsy.com/listing/${match[1]}`;
+                        return [url]; // Return first listing from chat
                     }
                 }
-            });
+            }
 
-            return urls;
+            // Priority 2: "Most recent order" section
+            const recentOrderSection = document.querySelector('.latest-order-module');
+            if (recentOrderSection) {
+                const orderLinks = recentOrderSection.querySelectorAll('a[href*="/listing/"]');
+                for (const link of orderLinks) {
+                    const href = link.href || link.getAttribute('href');
+                    const match = href?.match(/\/listing\/(\d+)/);
+                    if (match) {
+                        const url = `https://www.etsy.com/listing/${match[1]}`;
+                        return [url];
+                    }
+                }
+            }
+
+            // Priority 3: "Order history" section
+            const orderHistorySection = document.querySelector('[class*="order-history"]')
+                || Array.from(document.querySelectorAll('h3')).find(h =>
+                    h.textContent.includes('Order history') || h.textContent.includes('order history')
+                )?.closest('section, div[class*="module"]');
+
+            if (orderHistorySection) {
+                const historyLinks = orderHistorySection.querySelectorAll('a[href*="/listing/"]');
+                for (const link of historyLinks) {
+                    const href = link.href || link.getAttribute('href');
+                    const match = href?.match(/\/listing\/(\d+)/);
+                    if (match) {
+                        const url = `https://www.etsy.com/listing/${match[1]}`;
+                        return [url];
+                    }
+                }
+            }
+
+            // Priority 4: "Favorited items" section (lowest priority)
+            const favoritedSection = document.querySelector('[class*="favorited"]')
+                || Array.from(document.querySelectorAll('h3')).find(h =>
+                    h.textContent.includes('Favorited') || h.textContent.includes('favorited')
+                )?.closest('section, div[class*="module"]');
+
+            if (favoritedSection) {
+                const favoriteLinks = favoritedSection.querySelectorAll('a[href*="/listing/"]');
+                for (const link of favoriteLinks) {
+                    const href = link.href || link.getAttribute('href');
+                    const match = href?.match(/\/listing\/(\d+)/);
+                    if (match) {
+                        const url = `https://www.etsy.com/listing/${match[1]}`;
+                        return [url];
+                    }
+                }
+            }
+
+            // Fallback: If no priority sections found, scan ALL listing links
+            const allLinks = document.querySelectorAll('a[href*="/listing/"]');
+            for (const link of allLinks) {
+                const href = link.href || link.getAttribute('href');
+                const match = href?.match(/\/listing\/(\d+)/);
+                if (match) {
+                    const url = `https://www.etsy.com/listing/${match[1]}`;
+                    return [url]; // Return first listing found anywhere
+                }
+            }
+
+            return []; // No listings found at all
         }
     };
 

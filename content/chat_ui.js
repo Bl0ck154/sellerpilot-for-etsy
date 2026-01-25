@@ -437,13 +437,36 @@ function initChat() {
             }
         });
 
+        // Track initialization time to avoid false positives during startup
+        const initTime = Date.now();
+        const STARTUP_GRACE_PERIOD = 15000; // 15 seconds
+
         // Periodically check if extension context is still valid
         setInterval(() => {
             if (!chrome.runtime?.id) {
-                console.error('🔴 Extension context lost during runtime');
-                showExtensionReloadedBanner();
+                // Skip during startup grace period
+                if (Date.now() - initTime < STARTUP_GRACE_PERIOD) {
+                    return;
+                }
+
+                // Stop any active loading animations
+                removeLoadingMessage();
+
+                // Reset processing state to allow retry
+                isProcessing = false;
+                ELEMENTS.sendBtn.disabled = false;
+                ELEMENTS.sendBtn.style.opacity = '1';
+                ELEMENTS.sendBtn.style.cursor = 'pointer';
+                ELEMENTS.generateBtn.disabled = false;
+                ELEMENTS.generateBtn.style.opacity = '1';
+
+                // Show error with retry button if there's a message context
+                if (lastUserMessage) {
+                    addErrorMessage('Extension was reloaded. Please retry your request.', lastUserMessage);
+                    lastUserMessage = null; // Clear to prevent duplicate error messages
+                }
             }
-        }, 5000); // Check every 5 seconds
+        }, 15000); // Check every 15 seconds
     })();
 
     // --- CONFIGURATION ---
@@ -700,12 +723,41 @@ function initChat() {
         const deepseekKey = ELEMENTS.deepseekApiKeyInput.value.trim();
         const grokKey = ELEMENTS.grokApiKeyInput.value.trim();
 
+        // First, load existing keys to avoid overwriting with empty values
+        const existingKeys = await safeStorageGet(['gemini_api_key', 'deepseek_api_key', 'grok_api_key']);
+
+        if (!existingKeys) {
+            // Extension context is invalid
+            addMessage("❌ Failed to load existing keys. Please reload this page (F5) and try again.", "system");
+            console.error('⚠️ Cannot load existing keys - extension context invalid.');
+            return; // Don't close settings
+        }
+
+        // Build update object - only include keys that were actually changed
+        const updates = {};
+
+        // Only update if value is provided (non-empty)
+        // If field is empty, keep existing value
+        if (geminiKey) {
+            updates.gemini_api_key = geminiKey;
+        } else if (existingKeys.gemini_api_key) {
+            updates.gemini_api_key = existingKeys.gemini_api_key; // Preserve existing
+        }
+
+        if (deepseekKey) {
+            updates.deepseek_api_key = deepseekKey;
+        } else if (existingKeys.deepseek_api_key) {
+            updates.deepseek_api_key = existingKeys.deepseek_api_key; // Preserve existing
+        }
+
+        if (grokKey) {
+            updates.grok_api_key = grokKey;
+        } else if (existingKeys.grok_api_key) {
+            updates.grok_api_key = existingKeys.grok_api_key; // Preserve existing
+        }
+
         // Save all keys
-        const saveSuccess = await safeStorageSet({
-            gemini_api_key: geminiKey,
-            deepseek_api_key: deepseekKey,
-            grok_api_key: grokKey
-        });
+        const saveSuccess = await safeStorageSet(updates);
 
         // Check if save was successful
         if (!saveSuccess) {
@@ -717,7 +769,9 @@ function initChat() {
 
         // Update in-memory config for backward compatibility
         if (geminiKey) CONFIG.apiKeys.google = geminiKey;
+        else if (existingKeys.gemini_api_key) CONFIG.apiKeys.google = existingKeys.gemini_api_key;
 
+        console.log('✅ API Keys saved successfully');
         closeSettings();
         addMessage("✅ API Keys Saved", "system");
     }
@@ -860,11 +914,22 @@ function initChat() {
         const selectedOption = ELEMENTS.modelSelect.options[ELEMENTS.modelSelect.selectedIndex];
         const provider = selectedOption ? selectedOption.dataset.provider : "gemini";
 
+        console.log('🎯 Selected model:', modelId, 'Provider:', provider);
+
         // Get API key for the provider
         try {
             const apiKey = await window.AIServiceFactory.getApiKey(provider);
 
             if (!apiKey || !apiKey.trim()) {
+                console.warn('⚠️ No API key found for provider:', provider);
+                // Re-enable buttons since we're returning early
+                ELEMENTS.sendBtn.disabled = false;
+                ELEMENTS.sendBtn.style.opacity = '1';
+                ELEMENTS.sendBtn.style.cursor = 'pointer';
+                ELEMENTS.sendBtn.style.pointerEvents = 'auto';
+                ELEMENTS.generateBtn.disabled = false;
+                ELEMENTS.generateBtn.style.opacity = '1';
+                ELEMENTS.generateBtn.style.pointerEvents = 'auto';
                 // Open settings with focus on the specific provider
                 openSettingsForProvider(provider);
                 // DON'T clear input - let user try again after adding key
@@ -872,6 +937,14 @@ function initChat() {
             }
         } catch (e) {
             console.error('Failed to get API key:', e);
+            // Re-enable buttons since we're returning early
+            ELEMENTS.sendBtn.disabled = false;
+            ELEMENTS.sendBtn.style.opacity = '1';
+            ELEMENTS.sendBtn.style.cursor = 'pointer';
+            ELEMENTS.sendBtn.style.pointerEvents = 'auto';
+            ELEMENTS.generateBtn.disabled = false;
+            ELEMENTS.generateBtn.style.opacity = '1';
+            ELEMENTS.generateBtn.style.pointerEvents = 'auto';
             addMessage("⚠️ Extension error. Please refresh the page.", "system");
             return;
         }
@@ -949,8 +1022,10 @@ function initChat() {
             ELEMENTS.sendBtn.disabled = false;
             ELEMENTS.sendBtn.style.opacity = '1';
             ELEMENTS.sendBtn.style.cursor = 'pointer';
+            ELEMENTS.sendBtn.style.pointerEvents = 'auto';
             ELEMENTS.generateBtn.disabled = false;
             ELEMENTS.generateBtn.style.opacity = '1';
+            ELEMENTS.generateBtn.style.pointerEvents = 'auto';
         }
     }
 
@@ -963,8 +1038,14 @@ function initChat() {
             return; // Keep text in input, don't clear
         }
 
-        // DON'T clear input yet - only clear after successful send
-        // ELEMENTS.userInput.innerText = "";
+        // Disable buttons IMMEDIATELY to prevent double-clicks during lag
+        ELEMENTS.sendBtn.disabled = true;
+        ELEMENTS.sendBtn.style.opacity = '0.5';
+        ELEMENTS.sendBtn.style.cursor = 'not-allowed';
+        ELEMENTS.sendBtn.style.pointerEvents = 'none';
+        ELEMENTS.generateBtn.disabled = true;
+        ELEMENTS.generateBtn.style.opacity = '0.5';
+        ELEMENTS.generateBtn.style.pointerEvents = 'none';
 
         handleChatInteraction(text);
     }
@@ -1185,21 +1266,31 @@ function initChat() {
         errorContent.className = 'error-content';
         errorContent.innerText = `Error: ${errorText}`;
 
-        if (retryContext) {
-            const retryBtn = document.createElement('button');
-            retryBtn.className = 'retry-btn';
-            retryBtn.innerHTML = '🔄';
-            retryBtn.setAttribute('data-ai-tooltip', 'Retry request');
-            retryBtn.onclick = (e) => handleRetry(retryContext, e);
-            errorContent.appendChild(retryBtn);
-        }
-
         div.appendChild(errorContent);
+
+        // Create footer container for timestamp and retry button
+        const footer = document.createElement('div');
+        footer.className = 'error-footer';
 
         const time = document.createElement('span');
         time.className = 'etsy-ai-timestamp';
         time.innerText = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        div.appendChild(time);
+        footer.appendChild(time);
+
+        if (retryContext) {
+            const retryBtn = document.createElement('button');
+            retryBtn.className = 'retry-btn';
+            retryBtn.innerHTML = `
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
+                </svg>
+            `;
+            retryBtn.setAttribute('data-ai-tooltip', 'Retry request');
+            retryBtn.onclick = (e) => handleRetry(retryContext, e);
+            footer.appendChild(retryBtn);
+        }
+
+        div.appendChild(footer);
 
         ELEMENTS.chatBox.appendChild(div);
         ELEMENTS.chatBox.scrollTop = ELEMENTS.chatBox.scrollHeight;
@@ -1209,6 +1300,17 @@ function initChat() {
     async function handleRetry(retryContext, event) {
         if (!retryContext || isProcessing) return;
 
+        // Find the actual button element (user might click SVG inside)
+        const button = event?.target?.closest('.retry-btn');
+
+        // Disable button IMMEDIATELY to prevent double-clicks
+        if (button) {
+            button.disabled = true;
+            button.style.opacity = '0.5';
+            button.style.pointerEvents = 'none';
+            button.style.cursor = 'not-allowed';
+        }
+
         // Set processing state IMMEDIATELY to prevent race conditions
         isProcessing = true;
         ELEMENTS.sendBtn.disabled = true;
@@ -1216,12 +1318,6 @@ function initChat() {
         ELEMENTS.sendBtn.style.cursor = 'not-allowed';
         ELEMENTS.generateBtn.disabled = true;
         ELEMENTS.generateBtn.style.opacity = '0.5';
-
-        // Disable retry button during processing
-        if (event && event.target) {
-            event.target.disabled = true;
-            event.target.style.opacity = '0.5';
-        }
 
         // Don't re-show user message - it's already in the chat from original attempt
         // Just show loading and retry the API call
@@ -1312,73 +1408,88 @@ function initChat() {
 
     // Обгортка для streaming AI відповіді з UI оновленнями
     async function streamAIResponse(modelId, apiKey, conversationHistory, systemInstruction) {
-        // Create AI message div for streaming
-        const aiMsgDiv = document.createElement('div');
-        aiMsgDiv.className = 'etsy-ai-msg ai';
-        aiMsgDiv.id = 'streaming-msg';
-        aiMsgDiv.style.display = 'none'; // Спочатку приховано
-        ELEMENTS.chatBox.appendChild(aiMsgDiv);
-        ELEMENTS.chatBox.scrollTop = ELEMENTS.chatBox.scrollHeight;
+        let aiMsgDiv = null;
 
-        // Callbacks для обробки streaming
-        let firstChunk = true;
-        const onChunk = (chunkText, fullText) => {
-            if (firstChunk) {
-                // Прибираємо loading (той, що був створений в handleChatInteraction), показуємо реальний div
-                removeLoadingMessage();
-
-                aiMsgDiv.style.display = 'block';
-                firstChunk = false;
-            }
-            aiMsgDiv.innerHTML = parseMarkdown(fullText);
-            attachCopyButtonListeners(aiMsgDiv);
+        try {
+            // Create AI message div for streaming
+            aiMsgDiv = document.createElement('div');
+            aiMsgDiv.className = 'etsy-ai-msg ai';
+            aiMsgDiv.id = 'streaming-msg';
+            aiMsgDiv.style.display = 'none'; // Спочатку приховано
+            ELEMENTS.chatBox.appendChild(aiMsgDiv);
             ELEMENTS.chatBox.scrollTop = ELEMENTS.chatBox.scrollHeight;
-        };
 
-        const onComplete = async (fullText) => {
-            // Finalize message
-            aiMsgDiv.id = ''; // Remove streaming ID
-            const timestamp = document.createElement('span');
-            timestamp.className = 'etsy-ai-timestamp';
-            timestamp.innerText = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-            aiMsgDiv.appendChild(timestamp);
+            // Callbacks для обробки streaming
+            let firstChunk = true;
+            const onChunk = (chunkText, fullText) => {
+                if (firstChunk) {
+                    // Прибираємо loading (той, що був створений в handleChatInteraction), показуємо реальний div
+                    removeLoadingMessage();
 
-            // Save to global chat storage
-            await saveChatToStorage(fullText, "ai");
+                    aiMsgDiv.style.display = 'block';
+                    firstChunk = false;
+                }
+                aiMsgDiv.innerHTML = parseMarkdown(fullText);
+                attachCopyButtonListeners(aiMsgDiv);
+                ELEMENTS.chatBox.scrollTop = ELEMENTS.chatBox.scrollHeight;
+            };
 
-            // Generate title after first exchange (user message + AI response)
-            // Cache title using first words from AI response (no API call)
-            if (!currentChatTitle) {
-                const result = await safeStorageGet(['current_chat_messages']);
-                if (result) {
-                    const messages = result.current_chat_messages || [];
-                    // Check if this is first exchange (2 messages: 1 user + 1 AI)
-                    const userMessages = messages.filter(m => m.type === 'user');
-                    const aiMessages = messages.filter(m => m.type === 'ai');
+            const onComplete = async (fullText) => {
+                // Finalize message
+                aiMsgDiv.id = ''; // Remove streaming ID
+                const timestamp = document.createElement('span');
+                timestamp.className = 'etsy-ai-timestamp';
+                timestamp.innerText = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                aiMsgDiv.appendChild(timestamp);
 
-                    if (userMessages.length === 1 && aiMessages.length === 1) {
-                        // Use first words from AI response as title
-                        currentChatTitle = createFallbackTitle(aiMessages[0].text);
+                // Save to global chat storage
+                await saveChatToStorage(fullText, "ai");
+
+                // Generate title after first exchange (user message + AI response)
+                // Cache title using first words from AI response (no API call)
+                if (!currentChatTitle) {
+                    const result = await safeStorageGet(['current_chat_messages']);
+                    if (result) {
+                        const messages = result.current_chat_messages || [];
+                        // Check if this is first exchange (2 messages: 1 user + 1 AI)
+                        const userMessages = messages.filter(m => m.type === 'user');
+                        const aiMessages = messages.filter(m => m.type === 'ai');
+
+                        if (userMessages.length === 1 && aiMessages.length === 1) {
+                            // Use first words from AI response as title
+                            currentChatTitle = createFallbackTitle(aiMessages[0].text);
+                        }
                     }
                 }
+            };
+
+            const onError = (error) => {
+                aiMsgDiv.remove();
+                throw error;
+            };
+
+            // Викликаємо AI Service
+            await aiService.streamMessage({
+                modelId,
+                apiKey,
+                messages: conversationHistory,
+                systemInstruction,
+                onChunk,
+                onComplete,
+                onError
+            });
+        } catch (error) {
+            // Ensure cleanup on ANY error
+            removeLoadingMessage();
+
+            // Clean up streaming message div if it exists
+            if (aiMsgDiv && aiMsgDiv.parentNode) {
+                aiMsgDiv.remove();
             }
-        };
 
-        const onError = (error) => {
-            aiMsgDiv.remove();
+            // Re-throw to be caught by handleChatInteraction
             throw error;
-        };
-
-        // Викликаємо AI Service
-        await aiService.streamMessage({
-            modelId,
-            apiKey,
-            messages: conversationHistory,
-            systemInstruction,
-            onChunk,
-            onComplete,
-            onError
-        });
+        }
     }
 
     // ===== CHAT HISTORY MANAGEMENT =====

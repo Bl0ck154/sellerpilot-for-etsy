@@ -11,7 +11,7 @@ class DeepSeekService extends BaseAIService {
     }
 
     getApiEndpoint() {
-        return 'https://api.deepseek.com/v1/';
+        return 'https://api.deepseek.com/';
     }
 
     /**
@@ -96,6 +96,13 @@ AI: ${aiResponse}`;
         };
 
         try {
+            console.log('🚀 DeepSeek API Request:', {
+                url,
+                model: modelId,
+                messageCount: messagesWithSystem.length,
+                apiKeyPrefix: apiKey ? apiKey.substring(0, 10) + '...' : 'MISSING'
+            });
+
             const response = await fetch(url, {
                 method: "POST",
                 headers: {
@@ -105,12 +112,17 @@ AI: ${aiResponse}`;
                 body: JSON.stringify(payload)
             });
 
+            console.log('📡 DeepSeek Response Status:', response.status, response.statusText);
+
             if (!response.ok) {
                 let errorMessage = `DeepSeek API Error: ${response.status}`;
                 try {
                     const errorData = await response.json();
+                    console.error('❌ DeepSeek Error Response:', errorData);
                     errorMessage = errorData.error?.message || errorMessage;
-                } catch (e) { /* ignore json parse error */ }
+                } catch (e) {
+                    console.error('❌ Failed to parse error response:', e);
+                }
                 throw new Error(errorMessage);
             }
 
@@ -148,11 +160,17 @@ AI: ${aiResponse}`;
                 }
             }
 
+            console.log('✅ DeepSeek stream completed, total length:', fullText.length);
             if (onComplete) onComplete(fullText);
             return fullText;
 
         } catch (error) {
-            console.error('DeepSeek Stream Error:', error);
+            console.error('❌ DeepSeek Stream Error:', {
+                name: error.name,
+                message: error.message,
+                url,
+                model: modelId
+            });
             if (onError) onError(error);
             throw error;
         }

@@ -279,50 +279,68 @@
     border: 1px solid var(--border-color);
     border-bottom-left-radius: 4px;
     width: 90%;
-}\r
-\r
-/* Error messages with retry button */\r
-.etsy-ai-msg.error {\r
-    background: rgba(239, 68, 68, 0.1);\r
-    border-left: 3px solid #EF4444;\r
-    align-self: flex-start;\r
-    width: 90%;\r
-}\r
-\r
-.error-content {\r
-    display: flex;\r
-    align-items: center;\r
-    gap: 10px;\r
-    flex-wrap: wrap;\r
-}\r
-\r
-.retry-btn {\r
-    background: linear-gradient(135deg, #EF4444, #DC2626);\r
-    border: none;\r
-    border-radius: 6px;\r
-    padding: 6px 10px;\r
-    font-size: 16px;\r
-    cursor: pointer;\r
-    transition: all 0.2s ease;\r
-    flex-shrink: 0;\r
-}\r
-\r
-.retry-btn:hover:not(:disabled) {\r
-    background: linear-gradient(135deg, #DC2626, #B91C1C);\r
-    transform: scale(1.05);\r
-}\r
-\r
-.retry-btn:active:not(:disabled) {\r
-    transform: scale(0.95);\r
-}\r
-\r
-.retry-btn:disabled {\r
-    opacity: 0.5;\r
-    cursor: not-allowed;\r
-}\r
+}
+
+\r \r
+
+/* Error messages with retry button */
+.etsy-ai-msg.error {
+    background: rgba(239, 68, 68, 0.1);
+    border-left: 3px solid #EF4444;
+    align-self: flex-start;
+    width: 90%;
+}
+
+.error-content {
+    display: block;
+    margin-bottom: 4px;
+}
+
+.error-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 4px;
+}
+
+.retry-btn {
+    background: transparent;
+    border: none;
+    width: auto;
+    height: auto;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: #6B7280;
+    padding: 0;
+}
+
+.retry-btn svg {
+    transition: transform 0.3s ease;
+}
+
+.retry-btn:hover:not(:disabled) {
+    color: #374151;
+}
+
+.retry-btn:hover:not(:disabled) svg {
+    transform: rotate(180deg);
+}
+
+.retry-btn:active:not(:disabled) {
+    transform: scale(0.95);
+}
+
+.retry-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
 
 
-.etsy-ai-msg.ai pre {
+\r .etsy-ai-msg.ai pre {
     background-color: #F3F4F6;
     border: 1px solid var(--border-color);
     border-radius: 6px;

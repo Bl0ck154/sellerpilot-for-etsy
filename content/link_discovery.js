@@ -20,8 +20,9 @@ window.LinkDiscovery = (function () {
 
     // === INITIALIZATION ===
     function init() {
-        // Only run on messages pages
-        if (!window.location.pathname.startsWith('/messages')) {
+        // Only run on specific message conversation pages: /messages/{conversation_id}
+        // NOT on the general /messages page without an ID
+        if (!/^\/messages\/\d+/.test(window.location.pathname)) {
             return;
         }
 
@@ -123,30 +124,105 @@ window.LinkDiscovery = (function () {
         }
     }
 
-    // === LINK SCANNING ===
-
     /**
-     * Scan chat DOM for listing links
-     * @returns {string[]} Array of listing URLs
+     * Scan chat DOM for listing links WITH PRIORITY
+     * Priority order:
+     * 1. Chat window messages (highest - usually appears first in DOM)
+     * 2. "Most recent order" section (.latest-order-module)
+     * 3. "Order history" section
+     * 4. "Favorited items" section (lowest)
+     * 
+     * @returns {string[]} Array with single highest-priority listing URL, or empty
      */
     async function scanForListingLinks() {
-        const urls = new Set();
+        // Priority 1: Chat window messages
+        // Chat messages are typically in the main conversation area
+        // Look for links that are NOT part of order/favorite sections
+        const chatContainer = document.querySelector('[data-appears-component-name*="message"]')
+            || document.querySelector('.wt-conversation-message')
+            || document.querySelector('.message-container');
 
-        // Find all links in the chat/message area
-        const links = document.querySelectorAll('a[href*="/listing/"]');
-
-        for (const link of links) {
-            const href = link.href || link.getAttribute('href');
-            if (href && LISTING_PATTERN.test(href)) {
-                // Normalize URL
-                const url = normalizeListingUrl(href);
-                if (url) {
-                    urls.add(url);
+        if (chatContainer) {
+            const chatLinks = chatContainer.querySelectorAll('a[href*="/listing/"]');
+            for (const link of chatLinks) {
+                const href = link.href || link.getAttribute('href');
+                if (href && LISTING_PATTERN.test(href)) {
+                    const url = normalizeListingUrl(href);
+                    if (url) {
+                        return [url]; // Return first listing from chat
+                    }
                 }
             }
         }
 
-        return Array.from(urls);
+        // Priority 2: "Most recent order" section
+        const recentOrderSection = document.querySelector('.latest-order-module');
+        if (recentOrderSection) {
+            const orderLinks = recentOrderSection.querySelectorAll('a[href*="/listing/"]');
+            for (const link of orderLinks) {
+                const href = link.href || link.getAttribute('href');
+                if (href && LISTING_PATTERN.test(href)) {
+                    const url = normalizeListingUrl(href);
+                    if (url) {
+                        return [url]; // Return listing from most recent order
+                    }
+                }
+            }
+        }
+
+        // Priority 3: "Order history" section
+        // Usually has heading "Order history" or similar
+        const orderHistorySection = document.querySelector('[class*="order-history"]')
+            || Array.from(document.querySelectorAll('h3')).find(h =>
+                h.textContent.includes('Order history') || h.textContent.includes('order history')
+            )?.closest('section, div[class*="module"]');
+
+        if (orderHistorySection) {
+            const historyLinks = orderHistorySection.querySelectorAll('a[href*="/listing/"]');
+            for (const link of historyLinks) {
+                const href = link.href || link.getAttribute('href');
+                if (href && LISTING_PATTERN.test(href)) {
+                    const url = normalizeListingUrl(href);
+                    if (url) {
+                        return [url]; // Return first listing from order history
+                    }
+                }
+            }
+        }
+
+        // Priority 4: "Favorited items" section (lowest priority)
+        const favoritedSection = document.querySelector('[class*="favorited"]')
+            || Array.from(document.querySelectorAll('h3')).find(h =>
+                h.textContent.includes('Favorited') || h.textContent.includes('favorited')
+            )?.closest('section, div[class*="module"]');
+
+        if (favoritedSection) {
+            const favoriteLinks = favoritedSection.querySelectorAll('a[href*="/listing/"]');
+            for (const link of favoriteLinks) {
+                const href = link.href || link.getAttribute('href');
+                if (href && LISTING_PATTERN.test(href)) {
+                    const url = normalizeListingUrl(href);
+                    if (url) {
+                        return [url]; // Return first listing from favorited items
+                    }
+                }
+            }
+        }
+
+        // Fallback: If no priority sections found, scan ALL listing links on page
+        // This ensures we still find listings even on pages with different structure
+        const allLinks = document.querySelectorAll('a[href*="/listing/"]');
+        for (const link of allLinks) {
+            const href = link.href || link.getAttribute('href');
+            if (href && LISTING_PATTERN.test(href)) {
+                const url = normalizeListingUrl(href);
+                if (url) {
+                    return [url]; // Return first listing found anywhere
+                }
+            }
+        }
+
+        return []; // No listings found at all
     }
 
     /**
