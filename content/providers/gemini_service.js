@@ -132,10 +132,12 @@ AI: ${aiResponse}`;
                 }
 
                 // If not retryable or last attempt, throw
+                if (onError) onError(error);
                 throw error;
             }
         }
 
+        if (onError) onError(lastError);
         throw lastError;
     }
 
@@ -208,9 +210,7 @@ AI: ${aiResponse}`;
             return fullText;
 
         } catch (error) {
-            if (onError && attempt >= 1) { // Only call onError on final attempt
-                onError(error);
-            }
+            // Don't call onError during retry attempts - let the outer streamMessage handle it
             throw error;
         }
     }

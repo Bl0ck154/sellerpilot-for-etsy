@@ -12,7 +12,6 @@ window.LinkDiscovery = (function () {
     let initialized = false;
     let discoveryTriggered = false;
     let lastListingId = null; // Track to avoid duplicate fetches
-    let navigationIntervalId = null; // Track interval to prevent memory leak
     let retryCount = 0; // Track retry attempts to prevent infinite loop
 
     // === STORAGE ===
@@ -29,14 +28,13 @@ window.LinkDiscovery = (function () {
         initialized = true;
 
         setupTriggers();
-        setupNavigationListener();
     }
 
     // === TRIGGER SETUP ===
     function setupTriggers() {
         // Trigger 1: Focus on AI assistant input field
         document.addEventListener('focusin', (e) => {
-            if (isAIAssistantInput(e.target)) {
+            if (isAIAssistantInput(e.target) && !discoveryTriggered) {
                 triggerDiscovery();
             }
         });
@@ -47,33 +45,6 @@ window.LinkDiscovery = (function () {
                 triggerDiscovery();
             }
         });
-    }
-
-    /**
-     * Setup listener for SPA navigation to reset discovery state
-     */
-    function setupNavigationListener() {
-        // Prevent multiple intervals (memory leak fix)
-        if (navigationIntervalId) {
-            return;
-        }
-
-        let lastUrl = window.location.href;
-
-        navigationIntervalId = setInterval(() => {
-            // Check if extension context is still valid
-            if (!chrome.runtime?.id) {
-                clearInterval(navigationIntervalId);
-                navigationIntervalId = null;
-                return;
-            }
-
-            if (window.location.href !== lastUrl) {
-                lastUrl = window.location.href;
-                discoveryTriggered = false; // Reset so new chat can trigger discovery
-                lastListingId = null; // Reset listing cache
-            }
-        }, 1000);
     }
 
     /**
@@ -95,9 +66,11 @@ window.LinkDiscovery = (function () {
 
     // === MAIN DISCOVERY FLOW ===
     async function triggerDiscovery() {
+        // Immediately set flag to prevent duplicate calls
         if (discoveryTriggered) {
             return;
         }
+        discoveryTriggered = true;
 
         if (!chrome.runtime?.id) {
             return;
@@ -116,12 +89,14 @@ window.LinkDiscovery = (function () {
             if (!shopId || !listingId) {
                 // Limit retries to prevent infinite loop
                 if (retryCount >= 2) {
-                    console.warn('❌ LinkDiscovery: Max retries reached. shop_id or listing_id not available.');
-                    discoveryTriggered = true; // Block further attempts
-                    return;
+                    console.warn('❌ LinkDiscovery: Max retries - shop_id/listing_id not available');
+                    return; // Keep discoveryTriggered = true to prevent further attempts
                 }
 
                 retryCount++;
+                // Reset flag to allow retry
+                discoveryTriggered = false;
+
                 // Retry after 1.5 seconds
                 setTimeout(() => {
                     triggerDiscovery();
@@ -135,13 +110,14 @@ window.LinkDiscovery = (function () {
 
             // Skip if already fetched for this listing
             if (listingId === lastListingId) {
-                discoveryTriggered = true; // Set flag to prevent re-triggering
-                return;
+                return; // Keep discoveryTriggered = true
             }
 
             const listingData = await fetchListingDataViaAPI(shopId, listingId);
 
             if (!listingData) {
+                // Reset flag to allow manual retry
+                discoveryTriggered = false;
                 return;
             }
 
@@ -165,11 +141,10 @@ window.LinkDiscovery = (function () {
                 }
             });
 
-            discoveryTriggered = true;
-
         } catch (error) {
             console.error('🔴 LinkDiscovery: Error during discovery:', error);
-            // Don't set discoveryTriggered on error, allow retry
+            // Reset flag on error to allow retry
+            discoveryTriggered = false;
         }
     }
 

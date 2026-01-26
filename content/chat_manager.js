@@ -582,11 +582,15 @@
         // Get current conversation ID
         const match = window.location.pathname.match(/\/messages\/(\d+)/);
         const currentConvoId = match ? match[1] : null;
-        if (!currentConvoId) return;
+        if (!currentConvoId) {
+            return;
+        }
 
         // Find right column
         const rightCol = document.querySelector('.my-col-right');
-        if (!rightCol) return;
+        if (!rightCol) {
+            return;
+        }
 
         // Check extension context
         if (!chrome.runtime?.id) {
@@ -656,7 +660,7 @@
             attachImageListeners(container);
 
         } catch (error) {
-            console.warn('⚠️ Chat Manager: Failed to inject attachments viewer:', error);
+            console.error('⚠️ Chat Manager: Failed to inject attachments viewer:', error);
         }
     }
 
@@ -865,6 +869,16 @@
     }
 
     function startMonitoring() {
+        // Listen for storage changes to react instantly when interceptor saves chat history
+        chrome.storage.onChanged.addListener((changes, areaName) => {
+            if (areaName === 'local' && changes.ETSY_CHAT_HISTORY) {
+                // Immediately update attachments viewer
+                injectAttachmentsViewer().catch(err => {
+                    console.warn('⚠️ Failed to update attachments on storage change:', err);
+                });
+            }
+        });
+
         observer = new MutationObserver(scheduleLoop);
         observer.observe(document.body, {
             childList: true,

@@ -258,6 +258,12 @@ ${pageContent.markdown ? `\n\nPAGE CONTENT:\n${pageContent.markdown}` : ''}`;
                     return '';
                 }
 
+                // Get current conversation ID from URL
+                const currentConvoId = window.location.pathname.match(/\/messages\/(\d+)/)?.[1];
+                if (!currentConvoId) {
+                    return '';
+                }
+
                 const result = await chrome.storage.local.get(['ETSY_CHAT_HISTORY']);
                 const chatHistory = result.ETSY_CHAT_HISTORY;
 
@@ -265,10 +271,17 @@ ${pageContent.markdown ? `\n\nPAGE CONTENT:\n${pageContent.markdown}` : ''}`;
                     return '';
                 }
 
-                // Check if this is for the current conversation
-                const currentConvoId = window.location.pathname.match(/\/messages\/(\d+)/)?.[1];
-                if (chatHistory.convo_id && chatHistory.convo_id !== currentConvoId) {
-                    return ''; // Stale data from different conversation
+                // STRICT: Must match current conversation ID
+                if (!chatHistory.convo_id || chatHistory.convo_id !== currentConvoId) {
+                    return ''; // Wrong conversation or no convo_id set
+                }
+
+                // Check timestamp - if data is older than 30 seconds, it's likely stale
+                const age = Date.now() - (chatHistory.timestamp || 0);
+                if (age > 30000) {
+                    // Data is too old, likely from previous session
+                    // Return empty to avoid showing wrong context
+                    return '';
                 }
 
                 let context = '\n\n### CUSTOMER CONVERSATION HISTORY:\n';
@@ -281,9 +294,9 @@ ${pageContent.markdown ? `\n\nPAGE CONTENT:\n${pageContent.markdown}` : ''}`;
 
                     context += `[${sender}]${date ? ` (${date})` : ''}: ${text}\n`;
 
-                    // Include attachment info if present
-                    if (msg.attachments?.length > 0) {
-                        context += `  📎 ${msg.attachments.length} attachment(s)\n`;
+                    // Include attachment info (normalized to 'attachments' field)
+                    if (msg.attachments?.length > 0 || msg.has_images) {
+                        context += `  📎 ${msg.attachments?.length || 'Image'} attachment(s)\n`;
                     }
                 }
 
