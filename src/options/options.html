@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Etsy AI Assistant Settings</title>
+    <link rel="stylesheet" href="options.css">
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <h1>⚙️ Etsy AI Assistant Settings</h1>
+            <p class="subtitle">Personalize your Etsy experience</p>
+        </header>
+
+        <main>
+            <!-- Google Gemini API Key Section -->
+            <section class="settings-section">
+                <div class="setting-item setting-item-vertical">
+                    <div class="setting-info">
+                        <h2>🔑 Google Gemini API Key</h2>
+                        <p class="description">
+                            Enter your Google Gemini API key to enable AI features.
+                            <br>
+                            <small>Get your API key from <a href="https://aistudio.google.com/app/apikey"
+                                    target="_blank">Google AI Studio</a></small>
+                        </p>
+                    </div>
+                    <div class="input-with-toggle">
+                        <input type="password" id="geminiApiKeyInput" class="input-field"
+                            placeholder="Enter Gemini API key...">
+                        <button type="button" class="toggle-visibility-btn" data-target="geminiApiKeyInput"
+                            title="Show/Hide API Key">👁️</button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- DeepSeek API Key Section -->
+            <section class="settings-section">
+                <div class="setting-item setting-item-vertical">
+                    <div class="setting-info">
+                        <h2>🔑 DeepSeek API Key</h2>
+                        <p class="description">
+                            Enter your DeepSeek API key to enable DeepSeek models.
+                            <br>
+                            <small>Get your API key from <a href="https://platform.deepseek.com/api_keys"
+                                    target="_blank">DeepSeek Platform</a></small>
+                        </p>
+                    </div>
+                    <div class="input-with-toggle">
+                        <input type="password" id="deepseekApiKeyInput" class="input-field"
+                            placeholder="Enter DeepSeek API key...">
+                        <button type="button" class="toggle-visibility-btn" data-target="deepseekApiKeyInput"
+                            title="Show/Hide API Key">👁️</button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Grok API Key Section -->
+            <section class="settings-section">
+                <div class="setting-item setting-item-vertical">
+                    <div class="setting-info">
+                        <h2>🔑 Grok API Key</h2>
+                        <p class="description">
+                            Enter your Grok (xAI) API key to enable Grok models.
+                            <br>
+                            <small>Get your API key from <a href="https://console.x.ai/" target="_blank">xAI
+                                    Console</a></small>
+                        </p>
+                    </div>
+                    <div class="input-with-toggle">
+                        <input type="password" id="grokApiKeyInput" class="input-field"
+                            placeholder="Enter Grok API key...">
+                        <button type="button" class="toggle-visibility-btn" data-target="grokApiKeyInput"
+                            title="Show/Hide API Key">👁️</button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Custom Instructions Section -->
+            <section class="settings-section">
+                <div class="setting-item setting-item-vertical">
+                    <div class="setting-info">
+                        <h2>📝 Custom AI Instructions</h2>
+                        <p class="description">
+                            View and customize AI behavior instructions. Instructions auto-update when defaults change,
+                            unless you modify them.
+                            <br>
+                            <small>Click "Reset to Default" to restore original instructions and re-enable
+                                auto-updates.</small>
+                        </p>
+                    </div>
+                    <div class="textarea-with-reset">
+                        <textarea id="customInstructions" class="textarea-field" placeholder="Loading instructions..."
+                            rows="12"></textarea>
+                        <button type="button" id="resetInstructions" class="reset-btn">🔄 Reset to Default</button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Chat Manager Toggle Section -->
+            <section class="settings-section">
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <h2>🎨 Etsy Chat Style with Resizers</h2>
+                        <p class="description">
+                            Enhanced interface for Etsy message pages with resizable panels.
+                            <br>
+                            <small>Works on: <code>etsy.com/messages</code></small>
+                        </p>
+                    </div>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="chatManagerToggle" checked>
+                        <span class="slider"></span>
+                    </label>
+                </div>
+            </section>
+
+            <div id="status" class="status hidden">
+                <span class="status-icon">✓</span>
+                <span class="status-text">Settings saved</span>
+            </div>
+        </main>
+
+        <footer>
+            <p>
+                <strong>Etsy AI Assistant</strong> v1.0
+                <br>
+                <small>Made with ❤️ for better Etsy workflow</small>
+            </p>
+        </footer>
+    </div>
+
+    <script src="../content/config.js"></script>
+    <script src="../config/base_instruction.js"></script>
+    <script src="options.js"></script>
+</body>
+
+</html>
