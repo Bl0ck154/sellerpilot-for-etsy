@@ -23,6 +23,8 @@ class BaseAIService {
             etsyChatMessageChars: 1000
         },
 
+        lastBuildMetadata: null,
+
         trimText(text, maxChars) {
             if (!text || typeof text !== 'string') return '';
             if (text.length <= maxChars) return text;
@@ -57,18 +59,29 @@ ${markdown ? `\n\nPAGE CONTENT:\n${markdown}` : ''}`;
             // Check for custom instructions in storage
             let instruction = this.baseInstruction;
 
+            let customInstructionsActive = false;
             try {
                 const result = await chrome.storage.local.get(['custom_instructions']);
                 if (result.custom_instructions && result.custom_instructions.trim()) {
                     instruction = result.custom_instructions;
+                    customInstructionsActive = true;
                 }
             } catch (error) {
                 console.warn('Failed to load custom instructions, using default:', error);
             }
 
-            const policyAddendum = window.AgentPolicyManager
-                ? await window.AgentPolicyManager.buildSystemAddendum()
-                : '';
+            let policyAddendum = '';
+            let policyVersion = null;
+            if (window.AgentPolicyManager) {
+                const policy = await window.AgentPolicyManager.getPolicy();
+                policyVersion = policy.version || null;
+                policyAddendum = policy.systemAddendum ? `\n\n${policy.systemAddendum}` : '';
+            }
+
+            this.lastBuildMetadata = {
+                customInstructionsActive,
+                policyVersion
+            };
 
             const pageContent = safeContext.page_content || {};
             const metadata = safeContext.metadata || {};

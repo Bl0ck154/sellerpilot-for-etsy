@@ -269,3 +269,13 @@
 - [x] Зафіксувати назви GitHub secrets без самих секретів.
 - [x] Зафіксувати expiry `EDGE_API_KEY`: 2026-07-19 22:55, ключ треба вручну перевипустити в Partner Center.
 - [x] Commit і push docs.
+
+---
+
+# Фаза 23 — Remote policy/custom prompt hardening (2026-05-08)
+
+## План
+- [x] Посилити remote policy wording: safety policy overrides custom prompts on conflicts.
+- [x] Додати diagnostics: `policyVersion` і `customInstructionsActive`.
+- [x] Показувати Settings warning, якщо активний локальний custom prompt.
+- [x] Перевірити syntax/build/prompt size, commit і push.

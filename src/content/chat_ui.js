@@ -427,6 +427,7 @@ function initChat() {
         copyDiagnosticsBtn: document.getElementById('copy-diagnostics'),
         clearDiagnosticsBtn: document.getElementById('clear-diagnostics'),
         diagnosticsCount: document.getElementById('diagnostics-count'),
+        customInstructionsWarning: document.getElementById('custom-instructions-warning'),
         // History
         historyBtn: document.getElementById('history-btn'),
         newChatBtn: document.getElementById('new-chat-btn'),
@@ -671,6 +672,9 @@ function initChat() {
             if (namespace === 'local' && changes.current_context) {
                 updateContext(changes.current_context.newValue);
             }
+            if (namespace === 'local' && changes.custom_instructions) {
+                updateCustomInstructionsWarning(changes.custom_instructions.newValue);
+            }
         });
 
         ELEMENTS.modelSelect.addEventListener('change', async () => {
@@ -707,7 +711,7 @@ function initChat() {
     // --- SETTINGS LOGIC ---
     async function openSettings() {
         // Load all API keys
-        const result = await safeStorageGet(['gemini_api_key', 'deepseek_api_key', 'grok_api_key']);
+        const result = await safeStorageGet(['gemini_api_key', 'deepseek_api_key', 'grok_api_key', 'custom_instructions']);
 
         if (!result) {
             // Storage unavailable - don't open settings with empty fields
@@ -719,6 +723,7 @@ function initChat() {
         ELEMENTS.geminiApiKeyInput.value = result.gemini_api_key || '';
         ELEMENTS.deepseekApiKeyInput.value = result.deepseek_api_key || '';
         ELEMENTS.grokApiKeyInput.value = result.grok_api_key || '';
+        updateCustomInstructionsWarning(result.custom_instructions || '');
         await updateDiagnosticsCount();
 
         ELEMENTS.settingsOverlay.classList.add('visible');
@@ -727,7 +732,7 @@ function initChat() {
 
     async function openSettingsForProvider(providerId) {
         // Load all API keys
-        const result = await safeStorageGet(['gemini_api_key', 'deepseek_api_key', 'grok_api_key']);
+        const result = await safeStorageGet(['gemini_api_key', 'deepseek_api_key', 'grok_api_key', 'custom_instructions']);
 
         if (!result) {
             // Storage unavailable - don't open settings with empty fields
@@ -739,6 +744,7 @@ function initChat() {
         ELEMENTS.geminiApiKeyInput.value = result.gemini_api_key || '';
         ELEMENTS.deepseekApiKeyInput.value = result.deepseek_api_key || '';
         ELEMENTS.grokApiKeyInput.value = result.grok_api_key || '';
+        updateCustomInstructionsWarning(result.custom_instructions || '');
 
         // Focus on the specific provider's input
         setTimeout(() => {
@@ -762,6 +768,11 @@ function initChat() {
         // Show message about missing API key
         const providerName = providerId.charAt(0).toUpperCase() + providerId.slice(1);
         addMessage(`⚠️ Please configure your ${providerName} API Key to use this model.`, "system");
+    }
+
+    function updateCustomInstructionsWarning(customInstructions) {
+        if (!ELEMENTS.customInstructionsWarning) return;
+        ELEMENTS.customInstructionsWarning.style.display = customInstructions?.trim() ? 'block' : 'none';
     }
 
     function closeSettings() {
@@ -1095,6 +1106,7 @@ function initChat() {
             // Build conversation history for multi-turn chat from global storage
             const conversationHistory = await aiService.buildConversationHistory('global_chat', userMessageText);
             const { systemInstruction } = await aiService.constructPromptData(CURRENT_CONTEXT, userMessageText);
+            const promptMetadata = BaseAIService.INSTRUCTIONS.lastBuildMetadata || {};
 
             // Store minimal message context for retry functionality (history will be rebuilt on retry)
             lastUserMessage = {
@@ -1105,7 +1117,7 @@ function initChat() {
             };
 
             // Pass messages instead of contents to be provider-agnostic
-            await streamAIResponse(providerModelId, providerApiKey, conversationHistory, systemInstruction);
+            await streamAIResponse(providerModelId, providerApiKey, conversationHistory, systemInstruction, promptMetadata);
 
         } catch (e) {
             removeLoadingMessage();
@@ -1712,7 +1724,7 @@ function initChat() {
     }
 
     // Обгортка для streaming AI відповіді з UI оновленнями
-    async function streamAIResponse(modelId, apiKey, conversationHistory, systemInstruction) {
+    async function streamAIResponse(modelId, apiKey, conversationHistory, systemInstruction, promptMetadata = {}) {
         let aiMsgDiv = null;
         const startedAt = Date.now();
         let finalText = '';
@@ -1720,6 +1732,8 @@ function initChat() {
             provider: aiService?.getProviderName?.() || 'unknown',
             modelId,
             pageScope: systemInstruction.match(/\[PAGE_SCOPE:([^\]]+)\]/)?.[1]?.trim() || null,
+            policyVersion: promptMetadata.policyVersion || null,
+            customInstructionsActive: !!promptMetadata.customInstructionsActive,
             historyMessages: conversationHistory.length,
             promptChars: systemInstruction.length + conversationHistory.reduce((sum, msg) => sum + (msg.content?.length || 0), 0)
         };

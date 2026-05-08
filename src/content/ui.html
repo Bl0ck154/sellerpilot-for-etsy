@@ -68,6 +68,9 @@
             <input type="password" id="grok-api-key-input" autocomplete="off" placeholder="Enter Grok API key..."
                 style="width:100%;padding:10px;border:1px solid #E5E7EB;border-radius:8px;font-size:14px">
         </div>
+        <div id="custom-instructions-warning" style="display:none;margin-bottom:20px;padding:12px;border:1px solid #F59E0B;border-radius:10px;background:#FFFBEB;color:#92400E;font-size:12px;line-height:1.4">
+            Custom AI instructions are active. The remote safety policy still overrides risky or conflicting rules, but old custom prompts can reduce answer quality. Reset custom instructions in the extension options if replies feel too salesy.
+        </div>
         <div style="margin-bottom:20px;padding:12px;border:1px solid #E5E7EB;border-radius:10px;background:#F9FAFB">
             <div style="font-size:13px;font-weight:600;margin-bottom:6px">AI diagnostics</div>
             <div style="font-size:12px;color:#6B7280;margin-bottom:10px">Copies the last AI request metadata: model, duration, retry/fallback attempts, error type. API keys and prompts are not included.</div>
