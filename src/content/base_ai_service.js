@@ -92,6 +92,10 @@ ${markdown ? `\n\nPAGE CONTENT:\n${markdown}` : ''}`;
                 ? await window.MemoryManager.buildContextSection()
                 : '';
 
+            const shopIntelligenceContext = window.ShopIntelligenceManager
+                ? await window.ShopIntelligenceManager.buildContextSection()
+                : '';
+
             // Get RAG context from parsed listings (non-blocking read)
             const ragContext = await this.getRAGContext();
 
@@ -101,7 +105,7 @@ ${markdown ? `\n\nPAGE CONTENT:\n${markdown}` : ''}`;
             // PAGE_SCOPE tag — placed last so the model sees it right before generating
             const pageScope = this.getPageScope(metadata);
 
-            return `${instruction}${policyAddendum}${memoryContext}${pageContext}${ragContext}${chatHistoryContext}${pageScope}`;
+            return `${instruction}${policyAddendum}${memoryContext}${shopIntelligenceContext}${pageContext}${ragContext}${chatHistoryContext}${pageScope}`;
         },
 
         /**

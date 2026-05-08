@@ -456,6 +456,7 @@ function initChat() {
 
         await handleBrowserRestart(); // Auto-save previous chat if exists
         await loadConfiguration();
+        window.ShopIntelligenceManager?.maybeBootstrap('startup');
         restoreState();
         setupListeners();
         await loadCurrentChat(); // Load or start fresh chat
@@ -671,6 +672,7 @@ function initChat() {
         chrome.storage.onChanged.addListener((changes, namespace) => {
             if (namespace === 'local' && changes.current_context) {
                 updateContext(changes.current_context.newValue);
+                window.ShopIntelligenceManager?.maybeBootstrap('context_changed');
             }
             if (namespace === 'local' && changes.custom_instructions) {
                 updateCustomInstructionsWarning(changes.custom_instructions.newValue);
@@ -1107,6 +1109,9 @@ function initChat() {
             const conversationHistory = await aiService.buildConversationHistory('global_chat', userMessageText);
             const { systemInstruction } = await aiService.constructPromptData(CURRENT_CONTEXT, userMessageText);
             const promptMetadata = BaseAIService.INSTRUCTIONS.lastBuildMetadata || {};
+            const shopIntelMetadata = window.ShopIntelligenceManager
+                ? await window.ShopIntelligenceManager.getMetadata()
+                : {};
 
             // Store minimal message context for retry functionality (history will be rebuilt on retry)
             lastUserMessage = {
@@ -1117,7 +1122,10 @@ function initChat() {
             };
 
             // Pass messages instead of contents to be provider-agnostic
-            await streamAIResponse(providerModelId, providerApiKey, conversationHistory, systemInstruction, promptMetadata);
+            await streamAIResponse(providerModelId, providerApiKey, conversationHistory, systemInstruction, {
+                ...promptMetadata,
+                ...shopIntelMetadata
+            });
 
         } catch (e) {
             removeLoadingMessage();
@@ -1734,6 +1742,11 @@ function initChat() {
             pageScope: systemInstruction.match(/\[PAGE_SCOPE:([^\]]+)\]/)?.[1]?.trim() || null,
             policyVersion: promptMetadata.policyVersion || null,
             customInstructionsActive: !!promptMetadata.customInstructionsActive,
+            shopIntelVersion: promptMetadata.shopIntelVersion || null,
+            shopIntelAge: promptMetadata.shopIntelAge || null,
+            shopIntelSources: promptMetadata.shopIntelSources || [],
+            shopIntelActive: !!promptMetadata.shopIntelActive,
+            shopIntelReason: promptMetadata.shopIntelReason || null,
             historyMessages: conversationHistory.length,
             promptChars: systemInstruction.length + conversationHistory.reduce((sum, msg) => sum + (msg.content?.length || 0), 0)
         };

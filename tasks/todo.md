@@ -279,3 +279,15 @@
 - [x] Додати diagnostics: `policyVersion` і `customInstructionsActive`.
 - [x] Показувати Settings warning, якщо активний локальний custom prompt.
 - [x] Перевірити syntax/build/prompt size, commit і push.
+
+---
+
+# Фаза 24 — Async Gemini Shop Intelligence (2026-05-08)
+
+## План
+- [x] Додати `shop_intelligence_manager.js`: async bootstrap, cooldown, snapshot hash, no new Etsy API calls.
+- [x] Gemini summary з існуючого context/storage: page context, current Etsy chat, current listing cache.
+- [x] Інжектити compact `AUTO_SHOP_INTELLIGENCE` у prompt без блокування reply generation.
+- [x] Тригерити bootstrap на startup/context/conversation events, але throttled/debounced.
+- [x] Додати diagnostics metadata: shop intelligence version/age/sources.
+- [x] Перевірити syntax/build/prompt size, commit і push.

@@ -100,6 +100,8 @@ window.EtsyContextInterceptor = (function () {
                         timestamp: responseTimestamp
                     }
                 });
+
+                window.ShopIntelligenceManager?.maybeBootstrap('conversation_loaded');
             }
         }
 
