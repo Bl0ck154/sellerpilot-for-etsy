@@ -147,3 +147,12 @@
 - [x] Не видаляти й не змінювати Gemini fallback-chain; retry має працювати поверх існуючого chain.
 - [x] Записувати retry/fallback події в diagnostics attempts.
 - [x] Запустити syntax checks, commit і push.
+
+---
+
+# Фаза 11 — Доступний експорт diagnostics для підтримки (2026-05-08)
+
+## План
+- [x] Додати кнопку в Settings для копіювання останніх `AI_DIAGNOSTICS` без API keys і без prompt text.
+- [x] Показувати коротке системне повідомлення після копіювання або якщо diagnostics порожні.
+- [x] Запустити syntax checks, commit і push.

@@ -423,6 +423,7 @@ function initChat() {
         grokApiKeyInput: document.getElementById('grok-api-key-input'),
         saveSettingsBtn: document.getElementById('save-settings'),
         cancelSettingsBtn: document.getElementById('cancel-settings'),
+        copyDiagnosticsBtn: document.getElementById('copy-diagnostics'),
         // History
         historyBtn: document.getElementById('history-btn'),
         newChatBtn: document.getElementById('new-chat-btn'),
@@ -644,6 +645,7 @@ function initChat() {
         // Settings
         ELEMENTS.settingsBtn.addEventListener('click', openSettings);
         ELEMENTS.saveSettingsBtn.addEventListener('click', saveSettings);
+        ELEMENTS.copyDiagnosticsBtn?.addEventListener('click', copyDiagnosticsToClipboard);
         document.getElementById('cancel-settings').addEventListener('click', closeSettings);
 
         // Close on overlay click (mousedown для точності)
@@ -814,6 +816,31 @@ function initChat() {
         console.log('✅ API Keys saved successfully');
         closeSettings();
         addMessage("✅ API Keys Saved", "system");
+    }
+
+    async function copyDiagnosticsToClipboard() {
+        const result = await safeStorageGet(['AI_DIAGNOSTICS']);
+        if (!result) return;
+
+        const diagnostics = Array.isArray(result.AI_DIAGNOSTICS) ? result.AI_DIAGNOSTICS : [];
+        if (diagnostics.length === 0) {
+            addMessage('No AI diagnostics recorded yet.', 'system');
+            return;
+        }
+
+        const payload = JSON.stringify({
+            exported_at: new Date().toISOString(),
+            app: 'Etsy AI Assistant',
+            diagnostics
+        }, null, 2);
+
+        try {
+            await navigator.clipboard.writeText(payload);
+            addMessage(`Copied ${diagnostics.length} AI diagnostic record(s).`, 'system');
+        } catch (error) {
+            console.error('Failed to copy AI diagnostics:', error);
+            addMessage('Failed to copy diagnostics. Open DevTools and inspect AI_DIAGNOSTICS in chrome.storage.local.', 'system');
+        }
     }
 
     // --- APP LOGIC ---
