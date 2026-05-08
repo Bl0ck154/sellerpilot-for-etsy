@@ -15,7 +15,8 @@
     "host_permissions": [
         "https://www.etsy.com/*",
         "https://generativelanguage.googleapis.com/*",
-        "https://openrouter.ai/*"
+        "https://openrouter.ai/*",
+        "https://raw.githubusercontent.com/Bl0ck154/ChromeExtensionEtsyAI/*"
     ],
     "background": {
         "service_worker": "background/service_worker.js"
@@ -33,6 +34,7 @@
                 "libs/Readability.min.js",
                 "libs/turndown.js",
                 "content/page_parser.js",
+                "content/agent_policy_manager.js",
                 "content/etsy_context_interceptor.js",
                 "content/link_discovery.js",
                 "content/listing_editor_tracker.js",
@@ -60,6 +62,7 @@
             "resources": [
                 "content/chat_ui.css",
                 "content/ui.html",
+                "config/agent_policy.json",
                 "config/base_instruction.js",
                 "content/page_interceptor.js"
             ],

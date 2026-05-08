@@ -237,3 +237,14 @@
 - [x] Зробити Chromium build для Chrome/Edge.
 - [x] Переглянути git diff/status, щоб у commit потрапили тільки потрібні файли.
 - [x] Закомітити й запушити зміни.
+
+---
+
+# Фаза 20 — Remote agent policy + Store release automation (2026-05-08)
+
+## План
+- [x] Додати bundled `agent_policy.json` з prompt addendum / forbidden phrases / suggest prompt.
+- [x] Додати remote policy loader з TTL, fallback на bundled defaults і без remote JS execution.
+- [x] Інтегрувати policy в `base_ai_service.js` і `chat_ui.js` без збільшення page context budgets.
+- [x] Додати GitHub Actions workflow skeleton для build zip + Chrome Web Store upload/publish через secrets.
+- [x] Запустити syntax/JSON/build перевірки, переглянути diff, commit і push. Додано host permission для remote policy і CI-safe build без pause.

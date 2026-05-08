@@ -406,6 +406,7 @@ function initChat() {
     let currentChatTitle = null; // AI-generated title (will be set after first exchange)
     let loadedSessionId = null; // ID of loaded session from history (to update instead of duplicate)
     let lastUserMessage = null; // Stores last user message context for retry functionality
+    const DEFAULT_SUGGEST_RESPONSE_PROMPT = "Draft a cautious customer reply based on the Etsy conversation and page context. Do not accept custom work, promise feasibility, promise timing, or promise an exact result unless I explicitly approved it. If the customer asks for custom work, ask for needed details/references and say we will review before confirming. If the request sounds risky or unrealistic, politely decline or explain that we need to check first.";
 
     const ELEMENTS = {
         statusDot: document.getElementById('connection-status'),
@@ -640,8 +641,11 @@ function initChat() {
         ELEMENTS.sendBtn.addEventListener('click', sendMessage);
 
         // "Generate Draft" shortcut
-        ELEMENTS.generateBtn.addEventListener('click', () => {
-            handleChatInteraction("Draft a cautious customer reply based on the Etsy conversation and page context. Do not accept custom work, promise feasibility, promise timing, or promise an exact result unless I explicitly approved it. If the customer asks for custom work, ask for needed details/references and say we will review before confirming. If the request sounds risky or unrealistic, politely decline or explain that we need to check first.", true);
+        ELEMENTS.generateBtn.addEventListener('click', async () => {
+            const prompt = window.AgentPolicyManager
+                ? await window.AgentPolicyManager.getSuggestResponsePrompt(DEFAULT_SUGGEST_RESPONSE_PROMPT)
+                : DEFAULT_SUGGEST_RESPONSE_PROMPT;
+            handleChatInteraction(prompt, true);
         });
 
         // Settings
@@ -1477,26 +1481,35 @@ function initChat() {
         };
     }
 
-    function detectOverpromiseRisk(text, pageScope = '') {
+    function escapeRegExp(value) {
+        return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }
+
+    async function detectOverpromiseRisk(text, pageScope = '') {
         if (!text || !String(pageScope).startsWith('messages')) return null;
 
-        const patterns = [
-            /\byes,?\s+we\s+can\s+do\s+that\b/i,
-            /\bno\s+problem\b/i,
-            /\babsolutely\b/i,
-            /\bfor\s+sure\b/i,
-            /\bdefinitely\b/i,
-            /\bguarantee\b/i,
-            /\bwe\s+can\s+make\s+anything\b/i,
-            /\bexactly\s+as\s+you\s+want\b/i,
-            /\bi['’]?ll\s+get\s+started\s+right\s+away\b/i,
-            /\bwe\s+will\s+fix\s+everything\b/i,
-            /\bwe\s+can\s+recreate\s+it\s+exactly\b/i,
-            /\bturns?\s+out\s+perfect(?:ly)?\b/i
+        const fallbackPhrases = [
+            'Yes, we can do that',
+            'No problem',
+            'Absolutely',
+            'for sure',
+            'definitely',
+            'guarantee',
+            'we can make anything',
+            'exactly as you want',
+            "I'll get started right away",
+            'we will fix everything',
+            'we can recreate it exactly',
+            'turn out perfectly'
         ];
 
+        const phrases = window.AgentPolicyManager
+            ? await window.AgentPolicyManager.getForbiddenPhrases()
+            : fallbackPhrases;
+
         const matches = [];
-        for (const pattern of patterns) {
+        for (const phrase of (phrases.length ? phrases : fallbackPhrases)) {
+            const pattern = new RegExp(escapeRegExp(phrase), 'i');
             const match = text.match(pattern);
             if (match) matches.push(match[0]);
         }
@@ -1745,7 +1758,7 @@ function initChat() {
                 timestamp.innerText = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
                 aiMsgDiv.appendChild(timestamp);
 
-                const overpromiseRisk = detectOverpromiseRisk(fullText, diagnosticBase.pageScope || '');
+                const overpromiseRisk = await detectOverpromiseRisk(fullText, diagnosticBase.pageScope || '');
                 if (overpromiseRisk) {
                     addMessage(`Warning: this draft may overpromise (${overpromiseRisk.matches.join(', ')}). Review before sending or ask me to make it more cautious.`, 'system');
                 }
@@ -1797,7 +1810,7 @@ function initChat() {
                 durationMs: Date.now() - startedAt,
                 ok: true,
                 responseChars: finalText.length,
-                overpromiseRisk: detectOverpromiseRisk(finalText, diagnosticBase.pageScope || ''),
+                overpromiseRisk: await detectOverpromiseRisk(finalText, diagnosticBase.pageScope || ''),
                 attempts: aiService?.lastRequestDiagnostics?.attempts || null
             });
         } catch (error) {

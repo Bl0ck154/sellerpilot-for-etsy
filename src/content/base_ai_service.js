@@ -66,6 +66,10 @@ ${markdown ? `\n\nPAGE CONTENT:\n${markdown}` : ''}`;
                 console.warn('Failed to load custom instructions, using default:', error);
             }
 
+            const policyAddendum = window.AgentPolicyManager
+                ? await window.AgentPolicyManager.buildSystemAddendum()
+                : '';
+
             const pageContent = safeContext.page_content || {};
             const metadata = safeContext.metadata || {};
             const pageContext = this.getPageContext(pageContent, metadata);
@@ -84,7 +88,7 @@ ${markdown ? `\n\nPAGE CONTENT:\n${markdown}` : ''}`;
             // PAGE_SCOPE tag — placed last so the model sees it right before generating
             const pageScope = this.getPageScope(metadata);
 
-            return `${instruction}${memoryContext}${pageContext}${ragContext}${chatHistoryContext}${pageScope}`;
+            return `${instruction}${policyAddendum}${memoryContext}${pageContext}${ragContext}${chatHistoryContext}${pageScope}`;
         },
 
         /**

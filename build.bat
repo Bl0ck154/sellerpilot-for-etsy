@@ -79,4 +79,4 @@ echo.
 echo Tip: Any changes to src\manifest.json
 echo      will auto-apply to both browsers!
 echo.
-pause
+if not defined CI pause
