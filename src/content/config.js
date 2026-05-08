@@ -1,53 +1,25 @@
 // config.js - Configuration for Etsy AI Assistant
 // This file is loaded before other content scripts (see manifest.json)
 
+// Gemini fallback chain — primary first, silently fall through on failure.
+// Used both by populateModelDropdown (first entry wins as default) and by
+// gemini_service.js when a request fails.
+window.ETSY_AI_GEMINI_FALLBACK_CHAIN = [
+    "gemini-flash-latest",
+    "gemini-3.1-flash-lite-preview",
+    "gemini-3-flash-preview",
+    "gemini-2.5-flash"
+];
+
 window.ETSY_AI_CONFIG = {
-    // Available AI providers
     providers: [
         {
             id: "gemini",
             name: "Google Gemini",
-            models: [
-                {
-                    id: "gemini-3-flash-preview",
-                    name: "Gemini 3.0 Flash"
-                }
-            ],
-            defaultModel: "gemini-3-flash-preview"
-        },
-        {
-            id: "deepseek",
-            name: "DeepSeek",
-            models: [
-                {
-                    id: "deepseek-chat",
-                    name: "DeepSeek Chat"
-                },
-                {
-                    id: "deepseek-reasoner",
-                    name: "DeepSeek Reasoner"
-                }
-            ],
-            defaultModel: "deepseek-chat"
-        },
-        {
-            id: "grok",
-            name: "Grok (xAI)",
-            models: [
-                {
-                    id: "grok-beta",
-                    name: "Grok Beta"
-                },
-                {
-                    id: "grok-vision-beta",
-                    name: "Grok Vision Beta"
-                }
-            ],
-            defaultModel: "grok-beta"
+            models: window.ETSY_AI_GEMINI_FALLBACK_CHAIN.map(id => ({ id, name: id })),
+            defaultModel: window.ETSY_AI_GEMINI_FALLBACK_CHAIN[0]
         }
     ],
 
-    // Default provider (will be pre-selected in dropdown)
     defaultProvider: "gemini"
 };
-

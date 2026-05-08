@@ -14,6 +14,28 @@ class BaseAIService {
     static INSTRUCTIONS = {
         baseInstruction: window.ETSY_AI_BASE_INSTRUCTION,
 
+        LIMITS: {
+            pageMarkdownChars: 8000,
+            primaryListingDescriptionChars: 2500,
+            secondaryListings: 3,
+            secondarySnippetChars: 140,
+            etsyChatMessages: 20,
+            etsyChatMessageChars: 1000
+        },
+
+        trimText(text, maxChars) {
+            if (!text || typeof text !== 'string') return '';
+            if (text.length <= maxChars) return text;
+            return `${text.slice(0, maxChars).trim()}\n[trimmed ${text.length - maxChars} chars]`;
+        },
+
+        normalizeContext(context) {
+            return {
+                page_content: context?.page_content || context || {},
+                metadata: context?.metadata || context?.page_content?.metadata || {}
+            };
+        },
+
         getPageContext(pageContent, metadata) {
             const firstPart = `\n
 Now I am on the page:
@@ -23,12 +45,15 @@ Now I am on the page:
                 return firstPart;
             }
 
+            const markdown = this.trimText(pageContent.markdown, this.LIMITS.pageMarkdownChars);
+
             return `${firstPart}
 ${pageContent.excerpt ? `- Summary: ${pageContent.excerpt}` : ''}
-${pageContent.markdown ? `\n\nPAGE CONTENT:\n${pageContent.markdown}` : ''}`;
+${markdown ? `\n\nPAGE CONTENT:\n${markdown}` : ''}`;
         },
 
         async buildFullInstruction(context) {
+            const safeContext = this.normalizeContext(context);
             // Check for custom instructions in storage
             let instruction = this.baseInstruction;
 
@@ -41,9 +66,14 @@ ${pageContent.markdown ? `\n\nPAGE CONTENT:\n${pageContent.markdown}` : ''}`;
                 console.warn('Failed to load custom instructions, using default:', error);
             }
 
-            const pageContent = context.page_content || {};
-            const metadata = context.metadata || {};
+            const pageContent = safeContext.page_content || {};
+            const metadata = safeContext.metadata || {};
             const pageContext = this.getPageContext(pageContent, metadata);
+
+            // User memory (persistent facts) — placed high so it's visible before page-specific data
+            const memoryContext = window.MemoryManager
+                ? await window.MemoryManager.buildContextSection()
+                : '';
 
             // Get RAG context from parsed listings (non-blocking read)
             const ragContext = await this.getRAGContext();
@@ -51,98 +81,141 @@ ${pageContent.markdown ? `\n\nPAGE CONTENT:\n${pageContent.markdown}` : ''}`;
             // Get chat history context from Etsy conversation
             const chatHistoryContext = await this.getChatHistoryContext();
 
-            return `${instruction}${pageContext}${ragContext}${chatHistoryContext}`;
+            // PAGE_SCOPE tag — placed last so the model sees it right before generating
+            const pageScope = this.getPageScope(metadata);
+
+            return `${instruction}${memoryContext}${pageContext}${ragContext}${chatHistoryContext}${pageScope}`;
         },
 
         /**
-         * Get RAG context from cached listings
+         * Produce a [PAGE_SCOPE: ...] tag describing what kind of Etsy page the user is on.
+         * Lets the model pick the right mode (SEO / reply / triage / advice) without guessing from URL slugs.
+         */
+        getPageScope(metadata) {
+            let path = '';
+            try {
+                const url = metadata?.url || window.location.href;
+                path = new URL(url).pathname || '';
+            } catch (_) {
+                path = window.location.pathname || '';
+            }
+
+            const m = (re) => path.match(re);
+            let match;
+
+            if ((match = m(/^\/your\/shops\/me\/listing-editor\/edit\/(\d+)/))) {
+                return `\n\n[PAGE_SCOPE: listing-editor | listing_id=${match[1]}]`;
+            }
+            if ((match = m(/^\/messages\/(\d+)/))) {
+                return `\n\n[PAGE_SCOPE: messages | convo_id=${match[1]}]`;
+            }
+            if (/^\/messages/.test(path)) {
+                return `\n\n[PAGE_SCOPE: messages-inbox]`;
+            }
+            if (/^\/your\/shops\/me\//.test(path)) {
+                return `\n\n[PAGE_SCOPE: shop-dashboard | path=${path}]`;
+            }
+            if ((match = m(/^\/listing\/(\d+)/))) {
+                return `\n\n[PAGE_SCOPE: public-listing | listing_id=${match[1]}]`;
+            }
+            return `\n\n[PAGE_SCOPE: other | path=${path || '/'}]`;
+        },
+
+        /**
+         * Get RAG context from cached listings.
+         * Loads ALL listings relevant to the current page (primary + secondary mentions),
+         * gives the primary one a full description and the rest a short summary.
          * @returns {Promise<string>} Formatted context string or empty
          */
         async getRAGContext() {
             try {
-                // Only on specific message conversation pages: /messages/{conversation_id}
-                if (!/^\/messages\/\d+/.test(window.location.pathname)) {
+                const path = window.location.pathname;
+                const onMessages = /^\/messages\/\d+/.test(path);
+                const onEditor = /^\/your\/shops\/me\/listing-editor\/edit\/(\d+)/.test(path);
+                const onPublicListing = /^\/listing\/(\d+)/.test(path);
+
+                if (!onMessages && !onEditor && !onPublicListing) {
                     return '';
                 }
 
-                // 1. Try to get current listing ID from storage (set by etsy_context_interceptor)
-                let listingId = null;
+                // 1. Build prioritized list of listing IDs to pull from cache.
+                // Primary = the listing the user is actively looking at (editor / public / transaction).
+                // Secondary = other listings referenced on the page (chat attachments, recent orders, etc.)
+                const primaryIds = [];
+                const secondaryIds = [];
 
-                if (chrome.runtime?.id) {
+                if (onEditor) {
+                    primaryIds.push(path.match(/edit\/(\d+)/)[1]);
+                } else if (onPublicListing) {
+                    primaryIds.push(path.match(/\/listing\/(\d+)/)[1]);
+                } else if (onMessages && chrome.runtime?.id) {
                     try {
                         const result = await chrome.storage.local.get(['ETSY_CURRENT_LISTING_ID']);
-                        listingId = result.ETSY_CURRENT_LISTING_ID;
-                    } catch (e) {
-                        // Ignore error, fallback to DOM scanning
-                    }
+                        if (result.ETSY_CURRENT_LISTING_ID) primaryIds.push(result.ETSY_CURRENT_LISTING_ID);
+                    } catch (_) { /* ignore, fall back to DOM scanning */ }
                 }
 
-                // 2. Fallback: Scan DOM for listing links if no listing_id in storage
-                let listingIds = [];
-
-                if (listingId) {
-                    listingIds.push(listingId);
-                } else {
-                    const listingUrls = this.scanCurrentChatForListings();
-                    for (const url of listingUrls) {
-                        const id = url.match(/\/listing\/(\d+)/)?.[1];
-                        if (id) listingIds.push(id);
-                    }
+                // Scan DOM for additional listing references
+                for (const url of this.scanCurrentChatForListings()) {
+                    const id = url.match(/\/listing\/(\d+)/)?.[1];
+                    if (!id) continue;
+                    if (primaryIds.includes(id) || secondaryIds.includes(id)) continue;
+                    secondaryIds.push(id);
                 }
 
-                if (listingIds.length === 0) {
-                    return '';
-                }
+                const allIds = [...primaryIds, ...secondaryIds].slice(0, 5); // cap at 5 to keep prompt small
+                if (allIds.length === 0) return '';
 
-                // 3. Load all cached listings
-                const items = await chrome.storage.local.get(null);
+                // 2. Load cached data for those IDs only (avoid reading the whole storage)
+                const keys = allIds.map(id => `RAG_LISTING_${id}`);
+                const items = await chrome.storage.local.get(keys);
                 const TTL_24_HOURS = 24 * 60 * 60 * 1000;
                 const now = Date.now();
                 const expiredKeys = [];
 
-                // 4. Find first listing that exists in cache
-                for (const id of listingIds) {
+                const primary = [];
+                const secondary = [];
+
+                for (let i = 0; i < allIds.length; i++) {
+                    const id = allIds[i];
                     const storageKey = `RAG_LISTING_${id}`;
                     const cached = items[storageKey];
-
                     if (!cached || !cached.title) continue;
-
-                    // Check TTL
                     const age = now - (cached.timestamp || 0);
-                    if (age > TTL_24_HOURS) {
-                        expiredKeys.push(storageKey);
-                        continue;
-                    }
+                    if (age > TTL_24_HOURS) { expiredKeys.push(storageKey); continue; }
 
-                    // Found first valid cached listing!
-                    let context = '\n\n### PRODUCT CONTEXT (Etsy listing description):\n';
-                    context += `\n**${cached.title}**\n`;
-
-                    if (cached.personalization) {
-                        context += `Personalization field (for buyer): ${cached.personalization}\n`;
-                    }
-
-                    if (cached.description) {
-                        const desc = cached.description.length > 4000
-                            ? cached.description.substring(0, 4000) + '...'
-                            : cached.description;
-                        context += `Description: ${desc}\n`;
-                    }
-
-                    // Clean up expired entries
-                    if (expiredKeys.length > 0) {
-                        chrome.storage.local.remove(expiredKeys);
-                    }
-
-                    return context;
+                    const isPrimary = primaryIds.includes(id);
+                    (isPrimary ? primary : secondary).push({ id, cached, ageMs: age });
                 }
 
-                // Clean up expired even if no valid listing found
                 if (expiredKeys.length > 0) {
                     chrome.storage.local.remove(expiredKeys);
                 }
 
-                return '';
+                if (primary.length === 0 && secondary.length === 0) return '';
+
+                let context = '\n\n### PRODUCT_CONTEXT (cached listing data):\n';
+
+                for (const { id, cached, ageMs } of primary) {
+                    context += `\n**[PRIMARY listing_id=${id}] ${cached.title}** (cached ${this.formatAge(ageMs)} ago)\n`;
+                    if (cached.personalization) {
+                        context += `Personalization field (buyer-facing): ${cached.personalization}\n`;
+                    }
+                    if (cached.description) {
+                        const desc = this.trimText(cached.description, this.LIMITS.primaryListingDescriptionChars);
+                        context += `Description: ${desc}\n`;
+                    }
+                }
+
+                if (secondary.length > 0) {
+                    context += `\n**Other listings mentioned on this page (summary only):**\n`;
+                    for (const { id, cached } of secondary.slice(0, this.LIMITS.secondaryListings)) {
+                        const snippet = this.trimText((cached.description || '').replace(/\s+/g, ' '), this.LIMITS.secondarySnippetChars);
+                        context += `- listing_id=${id} — "${cached.title}"${snippet ? ` — ${snippet}` : ''}\n`;
+                    }
+                }
+
+                return context;
             } catch (error) {
                 console.warn('⚠️ RAG: Failed to load context:', error);
                 return '';
@@ -150,95 +223,73 @@ ${pageContent.markdown ? `\n\nPAGE CONTENT:\n${pageContent.markdown}` : ''}`;
         },
 
         /**
-         * Scan current chat DOM for listing URLs WITH PRIORITY
+         * Format a duration (ms) as a short human-readable age string.
+         */
+        formatAge(ms) {
+            if (ms < 60 * 1000) return `${Math.floor(ms / 1000)}s`;
+            if (ms < 60 * 60 * 1000) return `${Math.floor(ms / 60000)}m`;
+            if (ms < 24 * 60 * 60 * 1000) return `${Math.floor(ms / 3600000)}h`;
+            return `${Math.floor(ms / 86400000)}d`;
+        },
+
+        /**
+         * Scan current chat DOM for listing URLs, priority-sorted and deduped.
          * Priority order:
-         * 1. Chat window messages (highest)
+         * 1. Chat window messages
          * 2. "Most recent order" section (.latest-order-module)
          * 3. "Order history" section
-         * 4. "Favorited items" section (lowest)
-         * 
-         * @returns {string[]} Array with single highest-priority listing URL, or empty
+         * 4. "Favorited items" section
+         * 5. Anywhere else on the page (fallback)
+         * @returns {string[]} Unique listing URLs in priority order
          */
         scanCurrentChatForListings() {
+            const results = [];
+            const seen = new Set();
+
+            const collectFrom = (container) => {
+                if (!container) return;
+                const links = container.querySelectorAll('a[href*="/listing/"]');
+                for (const link of links) {
+                    const href = link.href || link.getAttribute('href');
+                    const match = href?.match(/\/listing\/(\d+)/);
+                    if (!match) continue;
+                    const id = match[1];
+                    if (seen.has(id)) continue;
+                    seen.add(id);
+                    results.push(`https://www.etsy.com/listing/${id}`);
+                }
+            };
+
             // Priority 1: Chat window messages
-            const chatContainer = document.querySelector('[data-appears-component-name*="message"]')
+            collectFrom(
+                document.querySelector('[data-appears-component-name*="message"]')
                 || document.querySelector('.wt-conversation-message')
-                || document.querySelector('.message-container');
+                || document.querySelector('.message-container')
+            );
 
-            if (chatContainer) {
-                const chatLinks = chatContainer.querySelectorAll('a[href*="/listing/"]');
-                for (const link of chatLinks) {
-                    const href = link.href || link.getAttribute('href');
-                    const match = href?.match(/\/listing\/(\d+)/);
-                    if (match) {
-                        const url = `https://www.etsy.com/listing/${match[1]}`;
-                        return [url]; // Return first listing from chat
-                    }
-                }
-            }
+            // Priority 2: "Most recent order"
+            collectFrom(document.querySelector('.latest-order-module'));
 
-            // Priority 2: "Most recent order" section
-            const recentOrderSection = document.querySelector('.latest-order-module');
-            if (recentOrderSection) {
-                const orderLinks = recentOrderSection.querySelectorAll('a[href*="/listing/"]');
-                for (const link of orderLinks) {
-                    const href = link.href || link.getAttribute('href');
-                    const match = href?.match(/\/listing\/(\d+)/);
-                    if (match) {
-                        const url = `https://www.etsy.com/listing/${match[1]}`;
-                        return [url];
-                    }
-                }
-            }
-
-            // Priority 3: "Order history" section
-            const orderHistorySection = document.querySelector('[class*="order-history"]')
+            // Priority 3: "Order history"
+            collectFrom(
+                document.querySelector('[class*="order-history"]')
                 || Array.from(document.querySelectorAll('h3')).find(h =>
-                    h.textContent.includes('Order history') || h.textContent.includes('order history')
-                )?.closest('section, div[class*="module"]');
+                    /order history/i.test(h.textContent)
+                )?.closest('section, div[class*="module"]')
+            );
 
-            if (orderHistorySection) {
-                const historyLinks = orderHistorySection.querySelectorAll('a[href*="/listing/"]');
-                for (const link of historyLinks) {
-                    const href = link.href || link.getAttribute('href');
-                    const match = href?.match(/\/listing\/(\d+)/);
-                    if (match) {
-                        const url = `https://www.etsy.com/listing/${match[1]}`;
-                        return [url];
-                    }
-                }
-            }
-
-            // Priority 4: "Favorited items" section (lowest priority)
-            const favoritedSection = document.querySelector('[class*="favorited"]')
+            // Priority 4: "Favorited items"
+            collectFrom(
+                document.querySelector('[class*="favorited"]')
                 || Array.from(document.querySelectorAll('h3')).find(h =>
-                    h.textContent.includes('Favorited') || h.textContent.includes('favorited')
-                )?.closest('section, div[class*="module"]');
+                    /favorited/i.test(h.textContent)
+                )?.closest('section, div[class*="module"]')
+            );
 
-            if (favoritedSection) {
-                const favoriteLinks = favoritedSection.querySelectorAll('a[href*="/listing/"]');
-                for (const link of favoriteLinks) {
-                    const href = link.href || link.getAttribute('href');
-                    const match = href?.match(/\/listing\/(\d+)/);
-                    if (match) {
-                        const url = `https://www.etsy.com/listing/${match[1]}`;
-                        return [url];
-                    }
-                }
-            }
+            // Priority 5: fallback — anywhere else on the page
+            collectFrom(document);
 
-            // Fallback: If no priority sections found, scan ALL listing links
-            const allLinks = document.querySelectorAll('a[href*="/listing/"]');
-            for (const link of allLinks) {
-                const href = link.href || link.getAttribute('href');
-                const match = href?.match(/\/listing\/(\d+)/);
-                if (match) {
-                    const url = `https://www.etsy.com/listing/${match[1]}`;
-                    return [url]; // Return first listing found anywhere
-                }
-            }
-
-            return []; // No listings found at all
+            return results;
         },
 
         /**
@@ -284,12 +335,14 @@ ${pageContent.markdown ? `\n\nPAGE CONTENT:\n${pageContent.markdown}` : ''}`;
                     return '';
                 }
 
-                let context = '\n\n### CUSTOMER CONVERSATION HISTORY:\n';
-                context += '(Messages between you and the customer, from oldest to newest)\n\n';
+                let context = `\n\n### CUSTOMER_CONVERSATION_HISTORY [CONTEXT_AGE: ${this.formatAge(age)}]:\n`;
+                context += '(Messages between the Owner and the customer, oldest → newest.)\n\n';
 
-                for (const msg of chatHistory.messages) {
+                const messages = chatHistory.messages.slice(-this.LIMITS.etsyChatMessages);
+
+                for (const msg of messages) {
                     const sender = msg.sender_display_name || `User ${msg.sender_user_id || msg.sender_id}` || 'Unknown';
-                    const text = msg.message_body || msg.message || '';
+                    const text = this.trimText(msg.message_body || msg.message || '', this.LIMITS.etsyChatMessageChars);
                     const date = msg.create_date ? new Date(msg.create_date * 1000).toLocaleString() : '';
 
                     context += `[${sender}]${date ? ` (${date})` : ''}: ${text}\n`;
@@ -316,18 +369,20 @@ ${pageContent.markdown ? `\n\nPAGE CONTENT:\n${pageContent.markdown}` : ''}`;
      * @returns {Promise<Array>} Array of message objects formatted for the provider.
      */
     async buildConversationHistory(userId, currentUserMessage) {
+        const MAX_HISTORY_MESSAGES = 16;
+        const MAX_MESSAGE_CHARS = 2500;
         const messages = [];
 
         // Always use global chat storage
         const key = 'current_chat_messages';
         try {
             const result = await chrome.storage.local.get([key]);
-            const history = result[key] || [];
+            const history = (result[key] || []).slice(-MAX_HISTORY_MESSAGES);
 
             for (const msg of history) {
                 messages.push({
                     role: msg.type === 'user' ? 'user' : 'assistant',
-                    content: msg.text
+                    content: this.trimMessageText(msg.text, MAX_MESSAGE_CHARS)
                 });
             }
         } catch (error) {
@@ -336,10 +391,16 @@ ${pageContent.markdown ? `\n\nPAGE CONTENT:\n${pageContent.markdown}` : ''}`;
 
         messages.push({
             role: 'user',
-            content: currentUserMessage
+            content: this.trimMessageText(currentUserMessage, MAX_MESSAGE_CHARS)
         });
 
         return messages;
+    }
+
+    trimMessageText(text, maxChars) {
+        if (!text || typeof text !== 'string') return '';
+        if (text.length <= maxChars) return text;
+        return `${text.slice(0, maxChars).trim()}\n[trimmed ${text.length - maxChars} chars]`;
     }
 
     /**
@@ -349,8 +410,9 @@ ${pageContent.markdown ? `\n\nPAGE CONTENT:\n${pageContent.markdown}` : ''}`;
      * @returns {Promise<Object>} { systemInstruction, userPrompt }
      */
     async constructPromptData(context, userQuery) {
+        const safeContext = context || { page_content: {}, metadata: {} };
         return {
-            systemInstruction: await BaseAIService.INSTRUCTIONS.buildFullInstruction(context),
+            systemInstruction: await BaseAIService.INSTRUCTIONS.buildFullInstruction(safeContext),
             userPrompt: `SHOP OWNER REQUEST:\n${userQuery}`
         };
     }

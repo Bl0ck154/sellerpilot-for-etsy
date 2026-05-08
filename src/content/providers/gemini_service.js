@@ -4,6 +4,9 @@
 class GeminiService extends BaseAIService {
     constructor() {
         super();
+        this.requestTimeoutMs = 30000;
+        this.totalRequestBudgetMs = 60000;
+        this.lastRequestDiagnostics = null;
     }
 
     getProviderName() {
@@ -112,28 +115,101 @@ AI: ${aiResponse}`;
      * @param {Function} [params.onError] - Callback for errors.
      * @returns {Promise<string>} The complete generated text.
      */
-    async streamMessage({ modelId, apiKey, messages, systemInstruction, onChunk, onComplete, onError }) {
-        const maxRetries = 2; // One automatic retry
-        let lastError = null;
+    /**
+     * Build the ordered list of models to try: requested model first (if it's
+     * in the chain, everything after it is fallback; if it's not in the chain,
+     * we try it first, then the full chain).
+     */
+    _buildFallbackList(requestedModelId) {
+        const chain = window.ETSY_AI_GEMINI_FALLBACK_CHAIN || [
+            'gemini-flash-latest',
+            'gemini-3.1-flash-lite-preview',
+            'gemini-3-flash-preview',
+            'gemini-2.5-flash'
+        ];
+        const idx = chain.indexOf(requestedModelId);
+        if (idx >= 0) return chain.slice(idx);
+        return requestedModelId ? [requestedModelId, ...chain] : [...chain];
+    }
 
-        for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    /**
+     * Decide whether to transparently fall back to the next model.
+     * Skip fallback for auth/permission errors — they won't fix themselves.
+     */
+    _shouldFallback(error) {
+        const status = error?.statusCode;
+        if (status === 400 || status === 401 || status === 403) return false;
+        return true;
+    }
+
+    async streamMessage({ modelId, apiKey, messages, systemInstruction, onChunk, onComplete, onError }) {
+        const models = this._buildFallbackList(modelId);
+        let lastError = null;
+        let chunkDelivered = false;
+        const startedAt = Date.now();
+        this.lastRequestDiagnostics = {
+            provider: this.getProviderName(),
+            requestedModel: modelId,
+            attempts: []
+        };
+
+        const wrappedOnChunk = (chunk, fullText) => {
+            chunkDelivered = true;
+            if (onChunk) onChunk(chunk, fullText);
+        };
+
+        for (let i = 0; i < models.length; i++) {
+            const currentModel = models[i];
+            const remainingBudgetMs = this.totalRequestBudgetMs - (Date.now() - startedAt);
+
+            if (remainingBudgetMs <= 0) {
+                lastError = new Error(`Gemini fallback timed out after ${Math.round(this.totalRequestBudgetMs / 1000)}s`);
+                break;
+            }
+
+            const attemptStartedAt = Date.now();
+            const attemptTimeoutMs = Math.min(this.requestTimeoutMs, remainingBudgetMs);
+
             try {
-                return await this._streamMessageInternal({ modelId, apiKey, messages, systemInstruction, onChunk, onComplete, onError, attempt });
+                const result = await this._streamMessageInternal({
+                    modelId: currentModel,
+                    apiKey,
+                    messages,
+                    systemInstruction,
+                    onChunk: wrappedOnChunk,
+                    onComplete,
+                    timeoutMs: attemptTimeoutMs
+                });
+                this.lastRequestDiagnostics.attempts.push({
+                    modelId: currentModel,
+                    durationMs: Date.now() - attemptStartedAt,
+                    ok: true
+                });
+                if (i > 0) {
+                    console.log(`✅ Gemini fallback succeeded on "${currentModel}" (primary "${models[0]}" failed)`);
+                }
+                return result;
             } catch (error) {
                 lastError = error;
+                this.lastRequestDiagnostics.attempts.push({
+                    modelId: currentModel,
+                    durationMs: Date.now() - attemptStartedAt,
+                    ok: false,
+                    statusCode: error?.statusCode || null,
+                    error: error?.message || String(error)
+                });
 
-                // Check if it's a 503 overloaded error
-                const isOverloaded = error.message && error.message.includes('overloaded');
+                // If we've already started streaming to the UI, we can't silently switch models
+                if (chunkDelivered) break;
 
-                if (isOverloaded && attempt < maxRetries) {
-                    console.log(`🔄 Gemini overloaded (503), retrying in 1s... (attempt ${attempt + 1}/${maxRetries + 1})`);
-                    await new Promise(resolve => setTimeout(resolve, 1000));
-                    continue; // Retry
+                // Non-retryable (e.g. bad API key) — stop immediately
+                if (!this._shouldFallback(error)) break;
+
+                // Try the next model if any remain
+                if (i < models.length - 1) {
+                    console.log(`🔄 Gemini fallback: "${currentModel}" failed (${error.message}) → trying "${models[i + 1]}"`);
+                    continue;
                 }
-
-                // If not retryable or last attempt, throw
-                if (onError) onError(error);
-                throw error;
             }
         }
 
@@ -141,7 +217,7 @@ AI: ${aiResponse}`;
         throw lastError;
     }
 
-    async _streamMessageInternal({ modelId, apiKey, messages, systemInstruction, onChunk, onComplete, onError, attempt = 0 }) {
+    async _streamMessageInternal({ modelId, apiKey, messages, systemInstruction, onChunk, onComplete, onError, attempt = 0, timeoutMs = this.requestTimeoutMs }) {
         const url = `${this.getApiEndpoint()}${modelId}:streamGenerateContent?alt=sse`;
 
         const contents = this._formatMessagesForGemini(messages);
@@ -153,14 +229,19 @@ AI: ${aiResponse}`;
             }
         };
 
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
         try {
+
             const response = await fetch(url, {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
                     "x-goog-api-key": apiKey
                 },
-                body: JSON.stringify(payload)
+                body: JSON.stringify(payload),
+                signal: controller.signal
             });
 
             if (!response.ok) {
@@ -169,7 +250,9 @@ AI: ${aiResponse}`;
                     const errorData = await response.json();
                     errorMessage = errorData.error?.message || errorMessage;
                 } catch (e) { /* ignore json parse error */ }
-                throw new Error(errorMessage);
+                const err = new Error(errorMessage);
+                err.statusCode = response.status;
+                throw err;
             }
 
             let fullText = '';
@@ -206,12 +289,21 @@ AI: ${aiResponse}`;
                 }
             }
 
+            if (!fullText.trim()) {
+                throw new Error('Gemini returned an empty response');
+            }
+
             if (onComplete) onComplete(fullText);
             return fullText;
 
         } catch (error) {
+            if (error?.name === 'AbortError') {
+                throw new Error(`Gemini request timed out after ${Math.round(timeoutMs / 1000)}s`);
+            }
             // Don't call onError during retry attempts - let the outer streamMessage handle it
             throw error;
+        } finally {
+            clearTimeout(timeoutId);
         }
     }
 }
