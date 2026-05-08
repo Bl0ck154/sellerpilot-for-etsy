@@ -641,7 +641,7 @@ function initChat() {
 
         // "Generate Draft" shortcut
         ELEMENTS.generateBtn.addEventListener('click', () => {
-            handleChatInteraction("Please draft a polite professional reply to this client based on our history and context.", true);
+            handleChatInteraction("Draft a cautious customer reply based on the Etsy conversation and page context. Do not accept custom work, promise feasibility, promise timing, or promise an exact result unless I explicitly approved it. If the customer asks for custom work, ask for needed details/references and say we will review before confirming. If the request sounds risky or unrealistic, politely decline or explain that we need to check first.", true);
         });
 
         // Settings
@@ -1477,6 +1477,33 @@ function initChat() {
         };
     }
 
+    function detectOverpromiseRisk(text, pageScope = '') {
+        if (!text || !String(pageScope).startsWith('messages')) return null;
+
+        const patterns = [
+            /\byes,?\s+we\s+can\s+do\s+that\b/i,
+            /\bno\s+problem\b/i,
+            /\babsolutely\b/i,
+            /\bfor\s+sure\b/i,
+            /\bdefinitely\b/i,
+            /\bguarantee\b/i,
+            /\bwe\s+can\s+make\s+anything\b/i,
+            /\bexactly\s+as\s+you\s+want\b/i,
+            /\bi['’]?ll\s+get\s+started\s+right\s+away\b/i,
+            /\bwe\s+will\s+fix\s+everything\b/i,
+            /\bwe\s+can\s+recreate\s+it\s+exactly\b/i,
+            /\bturns?\s+out\s+perfect(?:ly)?\b/i
+        ];
+
+        const matches = [];
+        for (const pattern of patterns) {
+            const match = text.match(pattern);
+            if (match) matches.push(match[0]);
+        }
+
+        return matches.length ? { matches: [...new Set(matches)].slice(0, 6) } : null;
+    }
+
     // Add error message with retry button
     function addErrorMessage(errorText, retryContext) {
         const classified = classifyAiError(errorText);
@@ -1718,6 +1745,11 @@ function initChat() {
                 timestamp.innerText = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
                 aiMsgDiv.appendChild(timestamp);
 
+                const overpromiseRisk = detectOverpromiseRisk(fullText, diagnosticBase.pageScope || '');
+                if (overpromiseRisk) {
+                    addMessage(`Warning: this draft may overpromise (${overpromiseRisk.matches.join(', ')}). Review before sending or ask me to make it more cautious.`, 'system');
+                }
+
                 // Save to global chat storage
                 await saveChatToStorage(fullText, "ai");
 
@@ -1765,6 +1797,7 @@ function initChat() {
                 durationMs: Date.now() - startedAt,
                 ok: true,
                 responseChars: finalText.length,
+                overpromiseRisk: detectOverpromiseRisk(finalText, diagnosticBase.pageScope || ''),
                 attempts: aiService?.lastRequestDiagnostics?.attempts || null
             });
         } catch (error) {

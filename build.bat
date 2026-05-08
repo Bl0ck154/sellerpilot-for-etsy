@@ -7,7 +7,7 @@ REM ============================================
 echo.
 echo ========================================
 echo   Building Etsy AI Assistant
-echo   Version: 1.6.2
+echo   Version: 1.6.3
 echo ========================================
 echo.
 
@@ -73,7 +73,7 @@ echo   Build Complete!
 echo ========================================
 echo.
 echo SOURCE:  src\manifest.json (EDIT THIS ONE!)
-echo Chrome:  dist\chrome\
+echo Chrome/Edge: dist\chrome\
 echo Firefox: dist\firefox\
 echo.
 echo Tip: Any changes to src\manifest.json

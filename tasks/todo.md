@@ -215,3 +215,25 @@
 - [x] Скидати active chat тільки при зміні Etsy scope (інший convo/listing/page mode), не на будь-яку дрібну зміну URL.
 - [x] Підняти extension version після стабілізаційних змін.
 - [x] Запустити syntax checks, commit і push.
+
+---
+
+# Фаза 18 — Conservative custom-work agent behavior (2026-05-08)
+
+## План
+- [x] Посилити `base_instruction.js`: кастомні роботи за замовчуванням тільки review/clarify, без acceptance до явного approval.
+- [x] Оновити `Suggest Response` shortcut, щоб дефолтний draft був cautious і не переобіцяв.
+- [x] Додати легкий локальний overpromise checker після відповіді: warning + diagnostics без другого AI-запиту.
+- [x] Зберегти page-aware поведінку: не різати `PAGE_CONTENT`, `PAGE_SCOPE`, RAG і Etsy chat context; prompt має лишитись компактним.
+- [x] Запустити syntax checks і переглянути diff.
+
+---
+
+# Фаза 19 — Verify and push conservative agent changes (2026-05-08)
+
+## План
+- [x] Перевірити JS syntax і prompt size після змін.
+- [x] Підняти extension version.
+- [x] Зробити Chromium build для Chrome/Edge.
+- [x] Переглянути git diff/status, щоб у commit потрапили тільки потрібні файли.
+- [x] Закомітити й запушити зміни.
