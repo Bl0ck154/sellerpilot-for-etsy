@@ -195,10 +195,25 @@ AI: ${aiResponse}`;
         await new Promise(resolve => setTimeout(resolve, ms));
     }
 
+    async _consumeDebugForced503() {
+        if (!chrome.runtime?.id) return false;
+
+        try {
+            const result = await chrome.storage.local.get(['ETSY_AI_DEBUG_FORCE_GEMINI_503_ONCE']);
+            if (!result.ETSY_AI_DEBUG_FORCE_GEMINI_503_ONCE) return false;
+            await chrome.storage.local.set({ ETSY_AI_DEBUG_FORCE_GEMINI_503_ONCE: false });
+            return true;
+        } catch (error) {
+            console.warn('Failed to read Gemini debug 503 flag:', error);
+            return false;
+        }
+    }
+
     async streamMessage({ modelId, apiKey, messages, systemInstruction, onChunk, onComplete, onError, onStatus }) {
         const models = this._buildFallbackList(modelId);
         let lastError = null;
         let chunkDelivered = false;
+        let forceDebug503 = await this._consumeDebugForced503();
         const startedAt = Date.now();
         this.lastRequestDiagnostics = {
             provider: this.getProviderName(),
@@ -227,6 +242,14 @@ AI: ${aiResponse}`;
             const attemptTimeoutMs = Math.min(this.requestTimeoutMs, remainingBudgetMs);
 
             try {
+                if (forceDebug503) {
+                    forceDebug503 = false;
+                    const debugError = new Error('Debug forced Gemini 503 overloaded');
+                    debugError.statusCode = 503;
+                    debugError.debugForced = true;
+                    throw debugError;
+                }
+
                 const result = await this._streamMessageInternal({
                     modelId: currentModel,
                     apiKey,
@@ -254,6 +277,7 @@ AI: ${aiResponse}`;
                     durationMs: Date.now() - attemptStartedAt,
                     ok: false,
                     thinkingMode,
+                    debugForced: !!error?.debugForced,
                     statusCode: error?.statusCode || null,
                     error: error?.message || String(error)
                 });

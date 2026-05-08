@@ -175,3 +175,13 @@
 - [x] Якщо Gemini/API відхиляє `thinkingConfig`, автоматично повторити ту ж модель без thinkingConfig, щоб не ламати відповідь.
 - [x] Записувати `thinkingMode` і prompt size у diagnostics attempts.
 - [x] Запустити syntax checks, commit і push.
+
+---
+
+# Фаза 14 — Debug mock для Gemini 503 retry/fallback (2026-05-08)
+
+## План
+- [x] Додати dev-only storage flag `ETSY_AI_DEBUG_FORCE_GEMINI_503_ONCE`, який симулює один 503 на наступному Gemini stream request.
+- [x] Після спрацювання автоматично вимикати flag, щоб не зламати реальних користувачів.
+- [x] Записувати mock-подію в diagnostics attempts.
+- [x] Запустити syntax checks, commit і push.
