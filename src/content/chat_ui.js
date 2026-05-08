@@ -1527,6 +1527,38 @@ function initChat() {
         ELEMENTS.chatBox.scrollTop = ELEMENTS.chatBox.scrollHeight;
     }
 
+    function showAiStatus(message) {
+        const loader = document.getElementById('loading-msg');
+        if (!loader) return;
+        loader.innerHTML = `<span class="etsy-ai-loading-dots"><span></span><span></span><span></span></span><span class="etsy-ai-status-text">${escapeHtml(message)}</span>`;
+        ELEMENTS.chatBox.scrollTop = ELEMENTS.chatBox.scrollHeight;
+    }
+
+    function showRetryCountdown(status) {
+        const baseMessage = status.type === 'fallback'
+            ? `Gemini лагає. Пробую fallback модель: ${status.nextModelId || 'next model'}.`
+            : `Gemini лагає. Роблю retry для ${status.modelId || 'моделі'}.`;
+
+        const delaySeconds = Math.ceil((status.delayMs || 0) / 1000);
+        if (!delaySeconds) {
+            showAiStatus(baseMessage);
+            return;
+        }
+
+        let remaining = delaySeconds;
+        showAiStatus(`${baseMessage} ${remaining}s...`);
+
+        const intervalId = setInterval(() => {
+            remaining -= 1;
+            if (remaining <= 0) {
+                clearInterval(intervalId);
+                showAiStatus(`${baseMessage} now...`);
+                return;
+            }
+            showAiStatus(`${baseMessage} ${remaining}s...`);
+        }, 1000);
+    }
+
     function removeLoadingMessage() {
         if (loadingInterval) {
             clearInterval(loadingInterval);
@@ -1644,6 +1676,10 @@ function initChat() {
                 throw error;
             };
 
+            const onStatus = (status) => {
+                showRetryCountdown(status);
+            };
+
             // Викликаємо AI Service
             await aiService.streamMessage({
                 modelId,
@@ -1652,7 +1688,8 @@ function initChat() {
                 systemInstruction,
                 onChunk,
                 onComplete,
-                onError
+                onError,
+                onStatus
             });
 
             await appendAiDiagnostic({

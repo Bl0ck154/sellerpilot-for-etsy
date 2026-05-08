@@ -136,3 +136,14 @@
 - [x] Не видаляти історію й не ховати контекст; просто створювати нову active-сесію для нової сторінки.
 - [x] Додати видимий divider у UI, щоб користувач бачив зміну контексту.
 - [x] Запустити syntax checks, commit і push.
+
+---
+
+# Фаза 10 — Gemini 503 auto-retry з видимим статусом (2026-05-08)
+
+## План
+- [x] Для Gemini 503/overloaded робити короткий retry на тій самій моделі перед fallback.
+- [x] Показувати користувачу тимчасове повідомлення: Gemini лагає, retry/fallback через N секунд.
+- [x] Не видаляти й не змінювати Gemini fallback-chain; retry має працювати поверх існуючого chain.
+- [x] Записувати retry/fallback події в diagnostics attempts.
+- [x] Запустити syntax checks, commit і push.

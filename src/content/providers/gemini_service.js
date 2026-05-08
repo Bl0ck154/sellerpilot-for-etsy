@@ -6,6 +6,7 @@ class GeminiService extends BaseAIService {
         super();
         this.requestTimeoutMs = 30000;
         this.totalRequestBudgetMs = 60000;
+        this.overloadedRetryDelayMs = 1500;
         this.lastRequestDiagnostics = null;
     }
 
@@ -142,7 +143,16 @@ AI: ${aiResponse}`;
         return true;
     }
 
-    async streamMessage({ modelId, apiKey, messages, systemInstruction, onChunk, onComplete, onError }) {
+    _isOverloaded(error) {
+        const message = (error?.message || '').toLowerCase();
+        return error?.statusCode === 503 || message.includes('overloaded') || message.includes('busy');
+    }
+
+    async _delay(ms) {
+        await new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    async streamMessage({ modelId, apiKey, messages, systemInstruction, onChunk, onComplete, onError, onStatus }) {
         const models = this._buildFallbackList(modelId);
         let lastError = null;
         let chunkDelivered = false;
@@ -205,8 +215,66 @@ AI: ${aiResponse}`;
                 // Non-retryable (e.g. bad API key) — stop immediately
                 if (!this._shouldFallback(error)) break;
 
+                if (this._isOverloaded(error)) {
+                    const retryRemainingBudgetMs = this.totalRequestBudgetMs - (Date.now() - startedAt) - this.overloadedRetryDelayMs;
+                    if (retryRemainingBudgetMs > 0) {
+                        if (onStatus) {
+                            onStatus({
+                                type: 'retry',
+                                modelId: currentModel,
+                                nextModelId: null,
+                                delayMs: this.overloadedRetryDelayMs,
+                                message: 'Gemini is busy. Retrying the same model...'
+                            });
+                        }
+                        await this._delay(this.overloadedRetryDelayMs);
+
+                        const retryStartedAt = Date.now();
+                        try {
+                            const result = await this._streamMessageInternal({
+                                modelId: currentModel,
+                                apiKey,
+                                messages,
+                                systemInstruction,
+                                onChunk: wrappedOnChunk,
+                                onComplete,
+                                timeoutMs: Math.min(this.requestTimeoutMs, retryRemainingBudgetMs)
+                            });
+                            this.lastRequestDiagnostics.attempts.push({
+                                modelId: currentModel,
+                                durationMs: Date.now() - retryStartedAt,
+                                ok: true,
+                                retry: true
+                            });
+                            return result;
+                        } catch (retryError) {
+                            lastError = retryError;
+                            this.lastRequestDiagnostics.attempts.push({
+                                modelId: currentModel,
+                                durationMs: Date.now() - retryStartedAt,
+                                ok: false,
+                                retry: true,
+                                statusCode: retryError?.statusCode || null,
+                                error: retryError?.message || String(retryError)
+                            });
+
+                            if (chunkDelivered) break;
+                            if (!this._shouldFallback(retryError)) break;
+                        }
+                    }
+                }
+
                 // Try the next model if any remain
                 if (i < models.length - 1) {
+                    if (onStatus) {
+                        onStatus({
+                            type: 'fallback',
+                            modelId: currentModel,
+                            nextModelId: models[i + 1],
+                            delayMs: 0,
+                            message: 'Gemini is still busy. Trying the next fallback model...'
+                        });
+                    }
                     console.log(`🔄 Gemini fallback: "${currentModel}" failed (${error.message}) → trying "${models[i + 1]}"`);
                     continue;
                 }
