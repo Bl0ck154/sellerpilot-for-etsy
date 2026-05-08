@@ -259,3 +259,13 @@
 - [x] Використати Partner Center secrets: Product ID, Client ID, API key.
 - [x] Додати manual publish toggle і tag-based publish.
 - [x] Перевірити YAML/PowerShell синтаксис, commit і push.
+
+---
+
+# Фаза 22 — Edge release ops docs (2026-05-08)
+
+## План
+- [x] Задокументувати, що Edge Add-ons автопублікація доступна через GitHub Actions.
+- [x] Зафіксувати назви GitHub secrets без самих секретів.
+- [x] Зафіксувати expiry `EDGE_API_KEY`: 2026-07-19 22:55, ключ треба вручну перевипустити в Partner Center.
+- [x] Commit і push docs.
