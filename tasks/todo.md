@@ -185,3 +185,13 @@
 - [x] Після спрацювання автоматично вимикати flag, щоб не зламати реальних користувачів.
 - [x] Записувати mock-подію в diagnostics attempts.
 - [x] Запустити syntax checks, commit і push.
+
+---
+
+# Фаза 15 — Diagnostics count і clear у Settings (2026-05-08)
+
+## План
+- [x] Показувати кількість записів `AI_DIAGNOSTICS` у Settings.
+- [x] Додати кнопку Clear diagnostics.
+- [x] Оновлювати count після copy/clear/open settings.
+- [x] Запустити syntax checks, commit і push.

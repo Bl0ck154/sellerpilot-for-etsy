@@ -424,6 +424,8 @@ function initChat() {
         saveSettingsBtn: document.getElementById('save-settings'),
         cancelSettingsBtn: document.getElementById('cancel-settings'),
         copyDiagnosticsBtn: document.getElementById('copy-diagnostics'),
+        clearDiagnosticsBtn: document.getElementById('clear-diagnostics'),
+        diagnosticsCount: document.getElementById('diagnostics-count'),
         // History
         historyBtn: document.getElementById('history-btn'),
         newChatBtn: document.getElementById('new-chat-btn'),
@@ -646,6 +648,7 @@ function initChat() {
         ELEMENTS.settingsBtn.addEventListener('click', openSettings);
         ELEMENTS.saveSettingsBtn.addEventListener('click', saveSettings);
         ELEMENTS.copyDiagnosticsBtn?.addEventListener('click', copyDiagnosticsToClipboard);
+        ELEMENTS.clearDiagnosticsBtn?.addEventListener('click', clearDiagnostics);
         document.getElementById('cancel-settings').addEventListener('click', closeSettings);
 
         // Close on overlay click (mousedown для точності)
@@ -712,6 +715,7 @@ function initChat() {
         ELEMENTS.geminiApiKeyInput.value = result.gemini_api_key || '';
         ELEMENTS.deepseekApiKeyInput.value = result.deepseek_api_key || '';
         ELEMENTS.grokApiKeyInput.value = result.grok_api_key || '';
+        await updateDiagnosticsCount();
 
         ELEMENTS.settingsOverlay.classList.add('visible');
         ELEMENTS.geminiApiKeyInput.focus();
@@ -837,10 +841,29 @@ function initChat() {
         try {
             await navigator.clipboard.writeText(payload);
             addMessage(`Copied ${diagnostics.length} AI diagnostic record(s).`, 'system');
+            updateDiagnosticsCount(diagnostics.length);
         } catch (error) {
             console.error('Failed to copy AI diagnostics:', error);
             addMessage('Failed to copy diagnostics. Open DevTools and inspect AI_DIAGNOSTICS in chrome.storage.local.', 'system');
         }
+    }
+
+    async function clearDiagnostics() {
+        const ok = await safeStorageSet({ AI_DIAGNOSTICS: [] });
+        if (!ok) return;
+        updateDiagnosticsCount(0);
+        addMessage('AI diagnostics cleared.', 'system');
+    }
+
+    async function updateDiagnosticsCount(knownCount = null) {
+        if (!ELEMENTS.diagnosticsCount) return;
+        let count = knownCount;
+        if (count === null) {
+            const result = await safeStorageGet(['AI_DIAGNOSTICS']);
+            if (!result) return;
+            count = Array.isArray(result.AI_DIAGNOSTICS) ? result.AI_DIAGNOSTICS.length : 0;
+        }
+        ELEMENTS.diagnosticsCount.textContent = `${count} record${count === 1 ? '' : 's'}`;
     }
 
     // --- APP LOGIC ---
