@@ -111,8 +111,18 @@
 # Фаза 7 — Стабілізація AI-відповідей без видалення моделей (2026-05-08)
 
 ## План
-- [ ] Додати safe fallback для порожнього/ще не готового `CURRENT_CONTEXT`, щоб AI-виклик не падав до Gemini.
-- [ ] Ввести prompt budget: обрізати page markdown, RAG, Etsy chat history і global chat history до контрольованого розміру.
-- [ ] Додати total budget для Gemini fallback-chain, не видаляючи актуальні Gemini-моделі 2026.
-- [ ] Додати lightweight diagnostic log останніх AI-запитів без секретів і без повного prompt.
-- [ ] Запустити syntax checks і переглянути diff перед висновком.
+- [x] Додати safe fallback для порожнього/ще не готового `CURRENT_CONTEXT`, щоб AI-виклик не падав до Gemini.
+- [x] Ввести prompt budget: обрізати page markdown, RAG, Etsy chat history і global chat history до контрольованого розміру.
+- [x] Додати total budget для Gemini fallback-chain, не видаляючи актуальні Gemini-моделі 2026.
+- [x] Додати lightweight diagnostic log останніх AI-запитів без секретів і без повного prompt.
+- [x] Запустити syntax checks і переглянути diff перед висновком.
+
+---
+
+# Фаза 8 — Зрозумілі помилки й наступні стабілізаційні кроки (2026-05-08)
+
+## План
+- [x] Класифікувати AI-помилки в UI: timeout, rate limit, auth, request-too-large, empty response, extension reload.
+- [x] Додати до error message коротку дію для користувача: retry, wait, check API key, shorten request, reload page.
+- [x] Зберігати `errorType` у diagnostics, щоб скарги можна було групувати.
+- [x] Запустити syntax checks, commit і push.

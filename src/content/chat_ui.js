@@ -1355,14 +1355,69 @@ function initChat() {
         }
     }
 
+    function classifyAiError(errorText = '') {
+        const text = String(errorText || 'Unknown error');
+        const lower = text.toLowerCase();
+
+        if (lower.includes('timed out') || lower.includes('timeout')) {
+            return {
+                type: 'timeout',
+                title: 'AI took too long to answer.',
+                action: 'Try Retry. If it repeats, send a shorter message or wait a minute.'
+            };
+        }
+        if (text.includes('429') || lower.includes('rate limit') || lower.includes('quota')) {
+            return {
+                type: 'rate_limit',
+                title: 'Gemini rate limit or quota was hit.',
+                action: 'Wait 1-2 minutes, then retry. If this happens often, check API quota.'
+            };
+        }
+        if (text.includes('401') || text.includes('403') || lower.includes('api key') || lower.includes('permission')) {
+            return {
+                type: 'auth',
+                title: 'API key or model access problem.',
+                action: 'Open Settings and verify the Gemini API key has access to this model.'
+            };
+        }
+        if (text.includes('400') || lower.includes('too large') || lower.includes('token') || lower.includes('invalid argument')) {
+            return {
+                type: 'bad_request',
+                title: 'The AI request was rejected.',
+                action: 'Try a shorter request or refresh the Etsy page so context is rebuilt.'
+            };
+        }
+        if (lower.includes('empty response') || lower.includes('no text')) {
+            return {
+                type: 'empty_response',
+                title: 'Gemini returned no text.',
+                action: 'Retry. If it repeats, try a different wording.'
+            };
+        }
+        if (lower.includes('extension context invalidated') || lower.includes('extension error')) {
+            return {
+                type: 'extension_context',
+                title: 'Extension context was reloaded.',
+                action: 'Reload this Etsy page and try again.'
+            };
+        }
+
+        return {
+            type: 'unknown',
+            title: 'AI request failed.',
+            action: 'Retry once. If it repeats, send the latest diagnostics to support.'
+        };
+    }
+
     // Add error message with retry button
     function addErrorMessage(errorText, retryContext) {
+        const classified = classifyAiError(errorText);
         const div = document.createElement('div');
         div.className = 'etsy-ai-msg system error';
 
         const errorContent = document.createElement('div');
         errorContent.className = 'error-content';
-        errorContent.innerText = `Error: ${errorText}`;
+        errorContent.innerText = `${classified.title}\n${classified.action}\n\nTechnical: ${errorText}`;
 
         div.appendChild(errorContent);
 
@@ -1601,6 +1656,7 @@ function initChat() {
                 durationMs: Date.now() - startedAt,
                 ok: false,
                 responseChars: finalText.length,
+                errorType: classifyAiError(error?.message).type,
                 error: error?.message || String(error),
                 attempts: aiService?.lastRequestDiagnostics?.attempts || null
             });
