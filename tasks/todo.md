@@ -248,3 +248,14 @@
 - [x] Інтегрувати policy в `base_ai_service.js` і `chat_ui.js` без збільшення page context budgets.
 - [x] Додати GitHub Actions workflow skeleton для build zip + Chrome Web Store upload/publish через secrets.
 - [x] Запустити syntax/JSON/build перевірки, переглянути diff, commit і push. Додано host permission для remote policy і CI-safe build без pause.
+
+---
+
+# Фаза 21 — Edge Add-ons API release workflow (2026-05-08)
+
+## План
+- [x] Додати GitHub Actions workflow для Microsoft Edge Add-ons Update API v1.1.
+- [x] Пакувати Chromium build `dist/chrome` для Edge без окремого `dist/edge`.
+- [x] Використати Partner Center secrets: Product ID, Client ID, API key.
+- [x] Додати manual publish toggle і tag-based publish.
+- [x] Перевірити YAML/PowerShell синтаксис, commit і push.

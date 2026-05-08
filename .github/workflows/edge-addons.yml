@@ -1,0 +1,163 @@
+name: Microsoft Edge Add-ons Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish after package upload
+        required: true
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+      notes:
+        description: Notes for certification
+        required: false
+        default: "Automated release from GitHub Actions."
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  release-edge:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build Chromium package
+        shell: cmd
+        run: build.bat
+
+      - name: Package Chrome/Edge build
+        shell: powershell
+        run: |
+          Compress-Archive -Path "dist/chrome/*" -DestinationPath "etsy-ai-assistant-edge.zip" -Force
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: etsy-ai-assistant-edge
+          path: etsy-ai-assistant-edge.zip
+
+      - name: Upload package to Edge Add-ons
+        id: edge_upload
+        shell: powershell
+        env:
+          EDGE_PRODUCT_ID: ${{ secrets.EDGE_PRODUCT_ID }}
+          EDGE_CLIENT_ID: ${{ secrets.EDGE_CLIENT_ID }}
+          EDGE_API_KEY: ${{ secrets.EDGE_API_KEY }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $headers = @{
+            Authorization = "ApiKey $env:EDGE_API_KEY"
+            "X-ClientID" = $env:EDGE_CLIENT_ID
+            "Content-Type" = "application/zip"
+          }
+
+          $uploadUri = "https://api.addons.microsoftedge.microsoft.com/v1/products/$env:EDGE_PRODUCT_ID/submissions/draft/package"
+          $uploadResponse = Invoke-WebRequest -Method Post -Uri $uploadUri -Headers $headers -InFile "etsy-ai-assistant-edge.zip"
+
+          if ($uploadResponse.StatusCode -ne 202) {
+            throw "Edge upload failed with status $($uploadResponse.StatusCode)"
+          }
+
+          $operationId = ($uploadResponse.Headers.Location | Select-Object -First 1)
+          if (-not $operationId) {
+            throw "Edge upload did not return an operation Location header"
+          }
+
+          "operation_id=$operationId" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Wait for Edge package processing
+        shell: powershell
+        env:
+          EDGE_PRODUCT_ID: ${{ secrets.EDGE_PRODUCT_ID }}
+          EDGE_CLIENT_ID: ${{ secrets.EDGE_CLIENT_ID }}
+          EDGE_API_KEY: ${{ secrets.EDGE_API_KEY }}
+          EDGE_OPERATION_ID: ${{ steps.edge_upload.outputs.operation_id }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $headers = @{
+            Authorization = "ApiKey $env:EDGE_API_KEY"
+            "X-ClientID" = $env:EDGE_CLIENT_ID
+          }
+
+          $statusUri = "https://api.addons.microsoftedge.microsoft.com/v1/products/$env:EDGE_PRODUCT_ID/submissions/draft/package/operations/$env:EDGE_OPERATION_ID"
+
+          for ($i = 1; $i -le 30; $i++) {
+            $response = Invoke-RestMethod -Method Get -Uri $statusUri -Headers $headers
+            $status = $response.status
+            Write-Host "Edge upload status: $status"
+
+            if ($status -in @("Succeeded", "Success", "Completed")) { exit 0 }
+            if ($status -in @("Failed", "Failure")) { throw "Edge upload processing failed: $($response | ConvertTo-Json -Depth 10)" }
+
+            Start-Sleep -Seconds 10
+          }
+
+          throw "Timed out waiting for Edge upload processing"
+
+      - name: Publish Edge Add-ons draft
+        id: edge_publish
+        if: ${{ startsWith(github.ref, 'refs/tags/v') || inputs.publish == 'true' }}
+        shell: powershell
+        env:
+          EDGE_PRODUCT_ID: ${{ secrets.EDGE_PRODUCT_ID }}
+          EDGE_CLIENT_ID: ${{ secrets.EDGE_CLIENT_ID }}
+          EDGE_API_KEY: ${{ secrets.EDGE_API_KEY }}
+          EDGE_NOTES: ${{ inputs.notes }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $headers = @{
+            Authorization = "ApiKey $env:EDGE_API_KEY"
+            "X-ClientID" = $env:EDGE_CLIENT_ID
+          }
+
+          $notes = if ($env:EDGE_NOTES) { $env:EDGE_NOTES } else { "Automated release from GitHub Actions." }
+          $body = @{ notes = $notes } | ConvertTo-Json
+          $publishUri = "https://api.addons.microsoftedge.microsoft.com/v1/products/$env:EDGE_PRODUCT_ID/submissions"
+          $publishResponse = Invoke-WebRequest -Method Post -Uri $publishUri -Headers $headers -ContentType "application/json" -Body $body
+
+          if ($publishResponse.StatusCode -ne 202) {
+            throw "Edge publish failed with status $($publishResponse.StatusCode)"
+          }
+
+          $operationId = ($publishResponse.Headers.Location | Select-Object -First 1)
+          if (-not $operationId) {
+            throw "Edge publish did not return an operation Location header"
+          }
+
+          "operation_id=$operationId" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Wait for Edge publish processing
+        if: ${{ startsWith(github.ref, 'refs/tags/v') || inputs.publish == 'true' }}
+        shell: powershell
+        env:
+          EDGE_PRODUCT_ID: ${{ secrets.EDGE_PRODUCT_ID }}
+          EDGE_CLIENT_ID: ${{ secrets.EDGE_CLIENT_ID }}
+          EDGE_API_KEY: ${{ secrets.EDGE_API_KEY }}
+          EDGE_OPERATION_ID: ${{ steps.edge_publish.outputs.operation_id }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $headers = @{
+            Authorization = "ApiKey $env:EDGE_API_KEY"
+            "X-ClientID" = $env:EDGE_CLIENT_ID
+          }
+
+          $statusUri = "https://api.addons.microsoftedge.microsoft.com/v1/products/$env:EDGE_PRODUCT_ID/submissions/operations/$env:EDGE_OPERATION_ID"
+
+          for ($i = 1; $i -le 30; $i++) {
+            $response = Invoke-RestMethod -Method Get -Uri $statusUri -Headers $headers
+            $status = $response.status
+            Write-Host "Edge publish status: $status"
+
+            if ($status -in @("Succeeded", "Success", "Completed")) { exit 0 }
+            if ($status -in @("Failed", "Failure")) { throw "Edge publish processing failed: $($response | ConvertTo-Json -Depth 10)" }
+
+            Start-Sleep -Seconds 10
+          }
+
+          throw "Timed out waiting for Edge publish processing"
