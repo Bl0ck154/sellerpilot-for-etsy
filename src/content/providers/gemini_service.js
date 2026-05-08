@@ -6,7 +6,7 @@ class GeminiService extends BaseAIService {
         super();
         this.requestTimeoutMs = 30000;
         this.totalRequestBudgetMs = 60000;
-        this.overloadedRetryDelayMs = 1500;
+        this.overloadedRetryDelaysMs = [1500, 3000];
         this.lastRequestDiagnostics = null;
     }
 
@@ -323,18 +323,23 @@ AI: ${aiResponse}`;
                 if (!this._shouldFallback(error)) break;
 
                 if (this._isOverloaded(error)) {
-                    const retryRemainingBudgetMs = this.totalRequestBudgetMs - (Date.now() - startedAt) - this.overloadedRetryDelayMs;
-                    if (retryRemainingBudgetMs > 0) {
+                    for (let retryIndex = 0; retryIndex < this.overloadedRetryDelaysMs.length; retryIndex++) {
+                        const retryDelayMs = this.overloadedRetryDelaysMs[retryIndex];
+                        const retryRemainingBudgetMs = this.totalRequestBudgetMs - (Date.now() - startedAt) - retryDelayMs;
+                        if (retryRemainingBudgetMs <= 0) break;
+
                         if (onStatus) {
                             onStatus({
                                 type: 'retry',
                                 modelId: currentModel,
                                 nextModelId: null,
-                                delayMs: this.overloadedRetryDelayMs,
+                                delayMs: retryDelayMs,
+                                retryNumber: retryIndex + 1,
+                                maxRetries: this.overloadedRetryDelaysMs.length,
                                 message: 'Gemini is busy. Retrying the same model...'
                             });
                         }
-                        await this._delay(this.overloadedRetryDelayMs);
+                        await this._delay(retryDelayMs);
 
                         const retryStartedAt = Date.now();
                         try {
@@ -353,6 +358,7 @@ AI: ${aiResponse}`;
                                 durationMs: Date.now() - retryStartedAt,
                                 ok: true,
                                 retry: true,
+                                retryNumber: retryIndex + 1,
                                 thinkingMode
                             });
                             return result;
@@ -363,6 +369,7 @@ AI: ${aiResponse}`;
                                 durationMs: Date.now() - retryStartedAt,
                                 ok: false,
                                 retry: true,
+                                retryNumber: retryIndex + 1,
                                 thinkingMode,
                                 statusCode: retryError?.statusCode || null,
                                 error: retryError?.message || String(retryError)
@@ -370,6 +377,10 @@ AI: ${aiResponse}`;
 
                             if (chunkDelivered) break;
                             if (!this._shouldFallback(retryError)) break;
+                            if (!this._isOverloaded(retryError)) {
+                                error = retryError;
+                                break;
+                            }
                         }
                     }
                 }

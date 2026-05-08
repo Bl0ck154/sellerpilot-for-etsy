@@ -195,3 +195,23 @@
 - [x] Додати кнопку Clear diagnostics.
 - [x] Оновлювати count після copy/clear/open settings.
 - [x] Запустити syntax checks, commit і push.
+
+---
+
+# Фаза 16 — Smarter Gemini 503 retry policy (2026-05-08)
+
+## План
+- [x] Для Gemini 503/overloaded робити до 2 retry на тій самій моделі з backoff 1.5s → 3s.
+- [x] Не ретраїти 400/401/403 і не виходити за total request budget.
+- [x] Показувати countdown для кожного retry і писати номер retry у diagnostics.
+- [x] Запустити syntax checks, commit і push.
+
+---
+
+# Фаза 17 — UI English + precise session scope + version bump (2026-05-08)
+
+## План
+- [x] Перекласти user-facing статуси/помилки/пам'ять/history labels на international English.
+- [x] Скидати active chat тільки при зміні Etsy scope (інший convo/listing/page mode), не на будь-яку дрібну зміну URL.
+- [x] Підняти extension version після стабілізаційних змін.
+- [x] Запустити syntax checks, commit і push.

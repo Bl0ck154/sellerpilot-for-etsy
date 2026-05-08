@@ -1161,23 +1161,23 @@ function initChat() {
         try {
             if (cmd.action === 'add') {
                 const res = await window.MemoryManager.add(cmd.text);
-                if (!res) reply = "⚠️ Не зміг зберегти — порожній факт.";
-                else if (res.duplicate) reply = `ℹ️ Вже пам'ятаю: "${res.entry.text}"`;
-                else reply = `💾 Запам'ятав: "${res.entry.text}"`;
+                if (!res) reply = "⚠️ Could not save an empty memory.";
+                else if (res.duplicate) reply = `ℹ️ Already remembered: "${res.entry.text}"`;
+                else reply = `💾 Remembered: "${res.entry.text}"`;
             } else if (cmd.action === 'remove') {
                 const res = await window.MemoryManager.removeByKeyword(cmd.keyword);
                 if (res.removed === 0) {
-                    reply = `🤔 Не знайшов у пам'яті нічого про "${cmd.keyword}".`;
+                    reply = `🤔 I could not find any memory about "${cmd.keyword}".`;
                 } else {
                     const preview = res.entries.map(e => `• ${e.text}`).join('\n');
-                    reply = `🗑️ Видалив (${res.removed}):\n${preview}`;
+                    reply = `🗑️ Removed (${res.removed}):\n${preview}`;
                 }
             } else if (cmd.action === 'clear') {
                 await window.MemoryManager.clear();
-                reply = "🗑️ Всю пам'ять очищено.";
+                reply = "🗑️ All memory cleared.";
             }
         } catch (e) {
-            reply = `❌ Помилка пам'яті: ${e.message || e}`;
+            reply = `❌ Memory error: ${e.message || e}`;
         }
 
         addMessage(reply, "system");
@@ -1405,6 +1405,24 @@ function initChat() {
         }
     }
 
+    function getContextScopeKey(context) {
+        const metadata = context?.metadata || {};
+        let path = '';
+        try {
+            path = new URL(metadata.url || context?.page_url || location.href).pathname || '';
+        } catch (_) {
+            path = location.pathname || '';
+        }
+
+        let match;
+        if ((match = path.match(/^\/messages\/(\d+)/))) return `messages:${match[1]}`;
+        if ((match = path.match(/^\/your\/shops\/me\/listing-editor\/edit\/(\d+)/))) return `listing-editor:${match[1]}`;
+        if ((match = path.match(/^\/listing\/(\d+)/))) return `public-listing:${match[1]}`;
+        if (/^\/messages/.test(path)) return 'messages-inbox';
+        if (/^\/your\/shops\/me\//.test(path)) return `shop-dashboard:${path.split('/').slice(0, 5).join('/')}`;
+        return `other:${path || '/'}`;
+    }
+
     function classifyAiError(errorText = '') {
         const text = String(errorText || 'Unknown error');
         const lower = text.toLowerCase();
@@ -1586,8 +1604,8 @@ function initChat() {
 
     function showRetryCountdown(status) {
         const baseMessage = status.type === 'fallback'
-            ? `Gemini лагає. Пробую fallback модель: ${status.nextModelId || 'next model'}.`
-            : `Gemini лагає. Роблю retry для ${status.modelId || 'моделі'}.`;
+            ? `Gemini is slow. Trying fallback model: ${status.nextModelId || 'next model'}.`
+            : `Gemini is slow. Retrying ${status.retryNumber || 1}/${status.maxRetries || 1} for ${status.modelId || 'model'}.`;
 
         const delaySeconds = Math.ceil((status.delayMs || 0) / 1000);
         if (!delaySeconds) {
@@ -1634,7 +1652,7 @@ function initChat() {
         loadedSessionId = null;
         currentSessionId = null;
         ELEMENTS.chatBox.innerHTML = '';
-        addSystemDivider(`Новий контекст: ${pageTitle || 'Etsy Page'}`);
+        addSystemDivider(`New context: ${pageTitle || 'Etsy Page'}`);
     }
 
     async function restoreState() {
@@ -1788,7 +1806,7 @@ function initChat() {
 
     // Create fallback title from AI response
     function createFallbackTitle(aiResponseText) {
-        if (!aiResponseText) return 'Новий чат';
+        if (!aiResponseText) return 'New chat';
 
         // Remove markdown formatting and extra whitespace
         let cleanText = aiResponseText
@@ -1813,7 +1831,7 @@ function initChat() {
             title += '...';
         }
 
-        return title || 'Новий чат';
+        return title || 'New chat';
     }
 
     // Save global chat to history index
@@ -1886,7 +1904,7 @@ function initChat() {
                     console.log('📝 Chat title from response:', sessionTitle);
                 } else {
                     // No messages to generate title from, use first words or generic fallback
-                    sessionTitle = aiMessages.length > 0 ? createFallbackTitle(aiMessages[0].text) : 'Новий чат';
+                    sessionTitle = aiMessages.length > 0 ? createFallbackTitle(aiMessages[0].text) : 'New chat';
                 }
             }
 
@@ -1984,11 +2002,11 @@ function initChat() {
     // Get Ukrainian label for group
     function getGroupLabel(groupKey) {
         const labels = {
-            today: 'Сьогодні',
-            yesterday: 'Вчора',
-            week: 'Попередні 7 днів',
-            month: 'Попередні 30 днів',
-            older: 'Давніше'
+            today: 'Today',
+            yesterday: 'Yesterday',
+            week: 'Previous 7 days',
+            month: 'Previous 30 days',
+            older: 'Older'
         };
         return labels[groupKey] || groupKey;
     }
@@ -2120,12 +2138,12 @@ function initChat() {
         });
 
         // Render messages
-        addSystemDivider(`Завантажено: ${session.title || session.name}`);
+        addSystemDivider(`Loaded: ${session.title || session.name}`);
         session.messages.forEach(msg => {
             renderMessage(msg.text, msg.type, msg.timestamp);
         });
 
-        addSystemDivider('Продовжуйте спілкування');
+        addSystemDivider('Continue the conversation');
         console.log('📂 Loaded session:', session.title || session.name);
     }
 
@@ -2165,11 +2183,11 @@ function initChat() {
     updateContext = async function (data) {
         if (!data) return;
 
-        const prevUrl = CURRENT_CONTEXT?.page_url;
-        const newUrl = data.page_url;
+        const prevScopeKey = getContextScopeKey(CURRENT_CONTEXT);
+        const nextScopeKey = getContextScopeKey(data);
 
-        // If switching to a different page, save current session first
-        if (newUrl && prevUrl && prevUrl !== newUrl) {
+        // If switching to a different Etsy object/page mode, save current session first.
+        if (CURRENT_CONTEXT && prevScopeKey !== nextScopeKey) {
             await saveCurrentSession();
             const nextTitle = data.page_content?.title || data.metadata?.title || 'Etsy Page';
             await resetActiveChatForNewPage(nextTitle);
