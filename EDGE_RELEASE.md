@@ -87,7 +87,23 @@ Current `EDGE_API_KEY` expires:
 2026-07-19 22:55
 ```
 
-Microsoft Edge Add-ons API keys do not auto-renew from this project. Before expiry, manually create/renew the API key in Partner Center and update the GitHub secret `EDGE_API_KEY`.
+Microsoft Edge Add-ons API keys do not auto-renew from this project. Before expiry, manually create/renew the API key in Partner Center and update this GitHub secret:
+
+```text
+https://github.com/Bl0ck154/ChromeExtensionEtsyAI/settings/secrets/actions/EDGE_API_KEY
+```
+
+Renew from Partner Center Publish API:
+
+```text
+https://partner.microsoft.com/en-us/dashboard/microsoftedge/publishapi
+```
+
+Reminder:
+
+```text
+Renew EDGE_API_KEY before 2026-07-19 22:55.
+```
 
 Partner Center:
 
