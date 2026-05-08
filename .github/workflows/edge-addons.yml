@@ -51,20 +51,28 @@ jobs:
           EDGE_API_KEY: ${{ secrets.EDGE_API_KEY }}
         run: |
           $ErrorActionPreference = "Stop"
-          $headers = @{
-            Authorization = "ApiKey $env:EDGE_API_KEY"
-            "X-ClientID" = $env:EDGE_CLIENT_ID
-            "Content-Type" = "application/zip"
-          }
-
           $uploadUri = "https://api.addons.microsoftedge.microsoft.com/v1/products/$env:EDGE_PRODUCT_ID/submissions/draft/package"
-          $uploadResponse = Invoke-WebRequest -Method Post -Uri $uploadUri -Headers $headers -InFile "etsy-ai-assistant-edge.zip"
+          $headersPath = Join-Path $env:RUNNER_TEMP "edge-upload-headers.txt"
 
-          if ($uploadResponse.StatusCode -ne 202) {
-            throw "Edge upload failed with status $($uploadResponse.StatusCode)"
+          & curl.exe `
+            -sS `
+            -D $headersPath `
+            -o "$env:RUNNER_TEMP\edge-upload-body.json" `
+            -w "%{http_code}" `
+            -H "Authorization: ApiKey $env:EDGE_API_KEY" `
+            -H "X-ClientID: $env:EDGE_CLIENT_ID" `
+            -H "Content-Type: application/zip" `
+            -X POST `
+            -T "etsy-ai-assistant-edge.zip" `
+            $uploadUri | Tee-Object -Variable statusCode
+
+          if ($statusCode -ne "202") {
+            $body = Get-Content "$env:RUNNER_TEMP\edge-upload-body.json" -Raw -ErrorAction SilentlyContinue
+            throw "Edge upload failed with status $statusCode. Body: $body"
           }
 
-          $operationId = ($uploadResponse.Headers.Location | Select-Object -First 1)
+          $operationId = (Get-Content $headersPath | Where-Object { $_ -match '^Location:' } | Select-Object -First 1) -replace '^Location:\s*', ''
+          $operationId = $operationId.Trim()
           if (-not $operationId) {
             throw "Edge upload did not return an operation Location header"
           }
@@ -111,21 +119,31 @@ jobs:
           EDGE_NOTES: ${{ inputs.notes }}
         run: |
           $ErrorActionPreference = "Stop"
-          $headers = @{
-            Authorization = "ApiKey $env:EDGE_API_KEY"
-            "X-ClientID" = $env:EDGE_CLIENT_ID
-          }
-
           $notes = if ($env:EDGE_NOTES) { $env:EDGE_NOTES } else { "Automated release from GitHub Actions." }
-          $body = @{ notes = $notes } | ConvertTo-Json
+          $bodyPath = Join-Path $env:RUNNER_TEMP "edge-publish-notes.json"
+          @{ notes = $notes } | ConvertTo-Json | Out-File -FilePath $bodyPath -Encoding utf8
           $publishUri = "https://api.addons.microsoftedge.microsoft.com/v1/products/$env:EDGE_PRODUCT_ID/submissions"
-          $publishResponse = Invoke-WebRequest -Method Post -Uri $publishUri -Headers $headers -ContentType "application/json" -Body $body
+          $headersPath = Join-Path $env:RUNNER_TEMP "edge-publish-headers.txt"
 
-          if ($publishResponse.StatusCode -ne 202) {
-            throw "Edge publish failed with status $($publishResponse.StatusCode)"
+          & curl.exe `
+            -sS `
+            -D $headersPath `
+            -o "$env:RUNNER_TEMP\edge-publish-body.json" `
+            -w "%{http_code}" `
+            -H "Authorization: ApiKey $env:EDGE_API_KEY" `
+            -H "X-ClientID: $env:EDGE_CLIENT_ID" `
+            -H "Content-Type: application/json" `
+            -X POST `
+            --data-binary "@$bodyPath" `
+            $publishUri | Tee-Object -Variable statusCode
+
+          if ($statusCode -ne "202") {
+            $body = Get-Content "$env:RUNNER_TEMP\edge-publish-body.json" -Raw -ErrorAction SilentlyContinue
+            throw "Edge publish failed with status $statusCode. Body: $body"
           }
 
-          $operationId = ($publishResponse.Headers.Location | Select-Object -First 1)
+          $operationId = (Get-Content $headersPath | Where-Object { $_ -match '^Location:' } | Select-Object -First 1) -replace '^Location:\s*', ''
+          $operationId = $operationId.Trim()
           if (-not $operationId) {
             throw "Edge publish did not return an operation Location header"
           }
