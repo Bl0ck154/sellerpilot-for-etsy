@@ -126,3 +126,13 @@
 - [x] Додати до error message коротку дію для користувача: retry, wait, check API key, shorten request, reload page.
 - [x] Зберігати `errorType` у diagnostics, щоб скарги можна було групувати.
 - [x] Запустити syntax checks, commit і push.
+
+---
+
+# Фаза 9 — Не міксувати старий чат з новою Etsy-сторінкою (2026-05-08)
+
+## План
+- [x] При зміні URL зберігати попередній чат в history і очищати active `current_chat_messages`.
+- [x] Не видаляти історію й не ховати контекст; просто створювати нову active-сесію для нової сторінки.
+- [x] Додати видимий divider у UI, щоб користувач бачив зміну контексту.
+- [x] Запустити syntax checks, commit і push.

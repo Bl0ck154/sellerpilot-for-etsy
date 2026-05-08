@@ -1543,6 +1543,18 @@ function initChat() {
         ELEMENTS.chatBox.appendChild(div);
     }
 
+    async function resetActiveChatForNewPage(pageTitle) {
+        await safeStorageSet({
+            current_chat_messages: [],
+            current_chat_metadata: {}
+        });
+        currentChatTitle = null;
+        loadedSessionId = null;
+        currentSessionId = null;
+        ELEMENTS.chatBox.innerHTML = '';
+        addSystemDivider(`Новий контекст: ${pageTitle || 'Etsy Page'}`);
+    }
+
     async function restoreState() {
         const result = await safeStorageGet(['current_context', 'preferred_model']);
         if (!result) return; // Extension context invalidated
@@ -2072,7 +2084,8 @@ function initChat() {
         // If switching to a different page, save current session first
         if (newUrl && prevUrl && prevUrl !== newUrl) {
             await saveCurrentSession();
-            currentSessionId = null; // Reset for new page
+            const nextTitle = data.page_content?.title || data.metadata?.title || 'Etsy Page';
+            await resetActiveChatForNewPage(nextTitle);
         }
 
         // Call original function
