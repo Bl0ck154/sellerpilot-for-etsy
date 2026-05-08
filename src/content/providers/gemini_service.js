@@ -97,6 +97,56 @@ AI: ${aiResponse}`;
         }));
     }
 
+    _getPromptSize(messages, systemInstruction) {
+        return (systemInstruction?.length || 0) +
+            messages.reduce((sum, msg) => sum + (msg.content?.length || 0), 0);
+    }
+
+    _selectThinkingMode(messages, systemInstruction) {
+        const promptChars = this._getPromptSize(messages, systemInstruction);
+        const lastUserMessage = [...messages].reverse().find(msg => msg.role === 'user')?.content || '';
+        const importantPattern = /важлив|термінов|urgent|important|strategy|стратег|аналіз|analy[sz]e|compare|порівняй|diagnos|чому|why|refund|case|dispute|скарг|negative review|відгук/i;
+
+        if (promptChars > 18000 || messages.length > 14 || importantPattern.test(lastUserMessage)) {
+            return 'deep';
+        }
+        if (promptChars > 9000 || messages.length > 8) {
+            return 'balanced';
+        }
+        return 'fast';
+    }
+
+    _getThinkingConfig(thinkingMode) {
+        // Gemini thinkingConfig is supported by newer Gemini models. If a model
+        // rejects it, streamMessage retries the same model without this config.
+        if (thinkingMode === 'fast') return { thinkingBudget: 0 };
+        if (thinkingMode === 'balanced') return { thinkingBudget: 1024 };
+        return { thinkingBudget: 4096 };
+    }
+
+    _buildStreamPayload(contents, systemInstruction, thinkingMode) {
+        const payload = {
+            contents: contents,
+            system_instruction: {
+                parts: [{ text: systemInstruction }]
+            }
+        };
+
+        if (thinkingMode) {
+            payload.generationConfig = {
+                thinkingConfig: this._getThinkingConfig(thinkingMode)
+            };
+        }
+
+        return payload;
+    }
+
+    _isThinkingConfigError(error) {
+        const message = (error?.message || '').toLowerCase();
+        return error?.statusCode === 400 &&
+            (message.includes('thinking') || message.includes('generationconfig') || message.includes('unknown field'));
+    }
+
     /**
      * Calls the Gemini Streaming API.
      * @param {Object} params - Configuration object.
@@ -153,8 +203,11 @@ AI: ${aiResponse}`;
         this.lastRequestDiagnostics = {
             provider: this.getProviderName(),
             requestedModel: modelId,
+            promptChars: this._getPromptSize(messages, systemInstruction),
+            thinkingMode: this._selectThinkingMode(messages, systemInstruction),
             attempts: []
         };
+        const thinkingMode = this.lastRequestDiagnostics.thinkingMode;
 
         const wrappedOnChunk = (chunk, fullText) => {
             chunkDelivered = true;
@@ -181,12 +234,14 @@ AI: ${aiResponse}`;
                     systemInstruction,
                     onChunk: wrappedOnChunk,
                     onComplete,
-                    timeoutMs: attemptTimeoutMs
+                    timeoutMs: attemptTimeoutMs,
+                    thinkingMode
                 });
                 this.lastRequestDiagnostics.attempts.push({
                     modelId: currentModel,
                     durationMs: Date.now() - attemptStartedAt,
-                    ok: true
+                    ok: true,
+                    thinkingMode
                 });
                 if (i > 0) {
                     console.log(`✅ Gemini fallback succeeded on "${currentModel}" (primary "${models[0]}" failed)`);
@@ -198,9 +253,44 @@ AI: ${aiResponse}`;
                     modelId: currentModel,
                     durationMs: Date.now() - attemptStartedAt,
                     ok: false,
+                    thinkingMode,
                     statusCode: error?.statusCode || null,
                     error: error?.message || String(error)
                 });
+
+                if (!chunkDelivered && this._isThinkingConfigError(error)) {
+                    const retryStartedAt = Date.now();
+                    try {
+                        const result = await this._streamMessageInternal({
+                            modelId: currentModel,
+                            apiKey,
+                            messages,
+                            systemInstruction,
+                            onChunk: wrappedOnChunk,
+                            onComplete,
+                            timeoutMs: Math.min(this.requestTimeoutMs, this.totalRequestBudgetMs - (Date.now() - startedAt)),
+                            thinkingMode: null
+                        });
+                        this.lastRequestDiagnostics.attempts.push({
+                            modelId: currentModel,
+                            durationMs: Date.now() - retryStartedAt,
+                            ok: true,
+                            retryWithoutThinkingConfig: true
+                        });
+                        return result;
+                    } catch (plainRetryError) {
+                        lastError = plainRetryError;
+                        this.lastRequestDiagnostics.attempts.push({
+                            modelId: currentModel,
+                            durationMs: Date.now() - retryStartedAt,
+                            ok: false,
+                            retryWithoutThinkingConfig: true,
+                            statusCode: plainRetryError?.statusCode || null,
+                            error: plainRetryError?.message || String(plainRetryError)
+                        });
+                        error = plainRetryError;
+                    }
+                }
 
                 // If we've already started streaming to the UI, we can't silently switch models
                 if (chunkDelivered) break;
@@ -231,13 +321,15 @@ AI: ${aiResponse}`;
                                 systemInstruction,
                                 onChunk: wrappedOnChunk,
                                 onComplete,
-                                timeoutMs: Math.min(this.requestTimeoutMs, retryRemainingBudgetMs)
+                                timeoutMs: Math.min(this.requestTimeoutMs, retryRemainingBudgetMs),
+                                thinkingMode
                             });
                             this.lastRequestDiagnostics.attempts.push({
                                 modelId: currentModel,
                                 durationMs: Date.now() - retryStartedAt,
                                 ok: true,
-                                retry: true
+                                retry: true,
+                                thinkingMode
                             });
                             return result;
                         } catch (retryError) {
@@ -247,6 +339,7 @@ AI: ${aiResponse}`;
                                 durationMs: Date.now() - retryStartedAt,
                                 ok: false,
                                 retry: true,
+                                thinkingMode,
                                 statusCode: retryError?.statusCode || null,
                                 error: retryError?.message || String(retryError)
                             });
@@ -278,17 +371,12 @@ AI: ${aiResponse}`;
         throw lastError;
     }
 
-    async _streamMessageInternal({ modelId, apiKey, messages, systemInstruction, onChunk, onComplete, onError, attempt = 0, timeoutMs = this.requestTimeoutMs }) {
+    async _streamMessageInternal({ modelId, apiKey, messages, systemInstruction, onChunk, onComplete, onError, attempt = 0, timeoutMs = this.requestTimeoutMs, thinkingMode = null }) {
         const url = `${this.getApiEndpoint()}${modelId}:streamGenerateContent?alt=sse`;
 
         const contents = this._formatMessagesForGemini(messages);
 
-        const payload = {
-            contents: contents,
-            system_instruction: {
-                parts: [{ text: systemInstruction }]
-            }
-        };
+        const payload = this._buildStreamPayload(contents, systemInstruction, thinkingMode);
 
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), timeoutMs);

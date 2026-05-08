@@ -165,3 +165,13 @@
 - [x] Замінити `gemini-2.0-flash-exp` у `generateChatTitle` на актуальний Gemini fallback-chain.
 - [x] Додати timeout і fallback для title generation, щоб dead/legacy path не зависав.
 - [x] Запустити syntax checks, commit і push.
+
+---
+
+# Фаза 13 — Adaptive Gemini thinking mode (2026-05-08)
+
+## План
+- [x] Додати adaptive thinking mode: fast для коротких задач, balanced/deep для великого контексту або важливих запитів.
+- [x] Якщо Gemini/API відхиляє `thinkingConfig`, автоматично повторити ту ж модель без thinkingConfig, щоб не ламати відповідь.
+- [x] Записувати `thinkingMode` і prompt size у diagnostics attempts.
+- [x] Запустити syntax checks, commit і push.
