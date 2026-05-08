@@ -23,12 +23,10 @@ class GeminiService extends BaseAIService {
      * @param {string} userMessage - The user's first message.
      * @param {string} aiResponse - The AI's first response.
      * @param {string} apiKey - Google API Key.
-     * @param {string} modelId - Model ID to use (defaults to fast model).
+     * @param {string} modelId - Model ID to use (defaults to current Gemini fallback chain).
      * @returns {Promise<string>} Generated chat title.
      */
-    async generateChatTitle(userMessage, aiResponse, apiKey, modelId = 'gemini-2.0-flash-exp') {
-        const url = `${this.getApiEndpoint()}${modelId}:generateContent`;
-
+    async generateChatTitle(userMessage, aiResponse, apiKey, modelId = null) {
         const prompt = `Проаналізуй цей діалог і придумай коротку назву (3-7 слів), яка відображає суть запиту. Віддай лише текст назви без лапок.
 
 Користувач: ${userMessage}
@@ -41,32 +39,26 @@ AI: ${aiResponse}`;
             }]
         };
 
-        const maxRetries = 1; // Reduced from 3 to avoid excessive API calls during rate limits
-        const retryDelays = [2000]; // Single retry with 2s delay
+        const models = this._buildFallbackList(modelId);
 
-        for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        for (const currentModel of models) {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 10000);
             try {
+                const url = `${this.getApiEndpoint()}${currentModel}:generateContent`;
                 const response = await fetch(url, {
                     method: "POST",
                     headers: {
                         "Content-Type": "application/json",
                         "x-goog-api-key": apiKey
                     },
-                    body: JSON.stringify(payload)
+                    body: JSON.stringify(payload),
+                    signal: controller.signal
                 });
 
                 if (!response.ok) {
                     const error = new Error(`API Error: ${response.status}`);
                     error.statusCode = response.status;
-
-                    // Retry only on 429 (rate limit) errors
-                    if (response.status === 429 && attempt < maxRetries) {
-                        const delay = retryDelays[attempt];
-                        console.warn(`⏳ Rate limit (429). Retrying in ${delay}ms...`);
-                        await new Promise(resolve => setTimeout(resolve, delay));
-                        continue; // Retry
-                    }
-
                     throw error;
                 }
 
@@ -77,17 +69,18 @@ AI: ${aiResponse}`;
                     return titleText;
                 }
 
-                // If no title text, throw error to trigger fallback
                 throw new Error('No title text in response');
             } catch (error) {
-                // If this is the last attempt or not a retryable error, throw to trigger fallback
-                if (attempt === maxRetries || (error.statusCode && error.statusCode !== 429)) {
-                    // Only log error on final attempt to reduce noise
-                    if (attempt === maxRetries) {
-                        console.warn('⚠️ Chat title generation failed after retries, using fallback');
-                    }
-                    throw error; // Caller will handle fallback
+                if (error?.name === 'AbortError') {
+                    error = new Error('Chat title generation timed out');
                 }
+
+                if (!this._shouldFallback(error) || currentModel === models[models.length - 1]) {
+                    console.warn('⚠️ Chat title generation failed, using fallback title:', error.message);
+                    throw error;
+                }
+            } finally {
+                clearTimeout(timeoutId);
             }
         }
     }

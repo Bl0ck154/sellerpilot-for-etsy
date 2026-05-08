@@ -156,3 +156,12 @@
 - [x] Додати кнопку в Settings для копіювання останніх `AI_DIAGNOSTICS` без API keys і без prompt text.
 - [x] Показувати коротке системне повідомлення після копіювання або якщо diagnostics порожні.
 - [x] Запустити syntax checks, commit і push.
+
+---
+
+# Фаза 12 — Прибрати застарілу Gemini title model (2026-05-08)
+
+## План
+- [x] Замінити `gemini-2.0-flash-exp` у `generateChatTitle` на актуальний Gemini fallback-chain.
+- [x] Додати timeout і fallback для title generation, щоб dead/legacy path не зависав.
+- [x] Запустити syntax checks, commit і push.
