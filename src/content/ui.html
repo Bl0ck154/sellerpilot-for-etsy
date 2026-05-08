@@ -1,63 +1,71 @@
 <div class="etsy-ai-header">
     <div class="etsy-ai-header-top">
         <div class="etsy-ai-branding"><span class="etsy-ai-name">Etsy Assistant</span>
-            <div class="etsy-ai-status-dot" id="connection-status"></div>
+            <div class="etsy-ai-status-dot" id="connection-status" role="status" aria-label="Connection status"></div>
         </div>
-        <div class="etsy-ai-current-page"><span id="page-title" class="etsy-ai-page-title">Loading...</span></div>
-        <div class="etsy-ai-header-actions"><button id="new-chat-btn" class="etsy-ai-icon-btn"
-                data-ai-tooltip="New Chat"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"
-                    stroke-width="1.5" stroke="currentColor">
+        <div class="etsy-ai-current-page"><span id="page-title" class="etsy-ai-page-title"></span></div>
+        <div class="etsy-ai-header-actions">
+            <button id="new-chat-btn" class="etsy-ai-icon-btn" aria-label="New Chat" data-ai-tooltip="New Chat"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"
+                    stroke-width="1.5" stroke="currentColor" aria-hidden="true">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-                </svg></button><button id="history-btn" class="etsy-ai-icon-btn" data-ai-tooltip="History"><svg
+                </svg></button>
+            <button id="history-btn" class="etsy-ai-icon-btn" aria-label="Chat History" data-ai-tooltip="History"><svg
                     xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
-                    stroke="currentColor">
+                    stroke="currentColor" aria-hidden="true">
                     <path stroke-linecap="round" stroke-linejoin="round"
                         d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0Z" />
-                </svg></button><button id="settings-btn" class="etsy-ai-icon-btn" data-ai-tooltip="Settings"><svg
+                </svg></button>
+            <button id="settings-btn" class="etsy-ai-icon-btn" aria-label="Settings" data-ai-tooltip="Settings"><svg
                     xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
-                    stroke="currentColor">
+                    stroke="currentColor" aria-hidden="true">
                     <path stroke-linecap="round" stroke-linejoin="round"
                         d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.24-.438.613-.431.992a6.759 6.759 0 010 .255c-.007.378.138.75.43.99l1.005.828c.424.35.534.954.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.28c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.992a6.932 6.932 0 010-.255c.007-.378-.138-.75-.43-.99l-1.004-.828a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.281z" />
                     <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                </svg></button><button id="etsy-ai-close-btn" class="etsy-ai-icon-btn" data-ai-tooltip="Close"><svg
+                </svg></button>
+            <button id="etsy-ai-close-btn" class="etsy-ai-icon-btn" aria-label="Close assistant" data-ai-tooltip="Close"><svg
                     xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
-                    stroke="currentColor">
+                    stroke="currentColor" aria-hidden="true">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
-                </svg></button></div>
+                </svg></button>
+        </div>
     </div>
 </div>
-<div id="chat-box" class="etsy-ai-chat-box"></div>
+<div id="chat-box" class="etsy-ai-chat-box" role="log" aria-live="polite" aria-atomic="false" aria-label="Chat messages"></div>
 <div class="etsy-ai-input-area">
     <div class="etsy-ai-input-container">
         <div class="etsy-ai-input-wrapper">
-            <div id="user-input" class="etsy-ai-input-editable" contenteditable="true"
+            <label for="user-input" class="sr-only">Type your message</label>
+            <div id="user-input" class="etsy-ai-input-editable" contenteditable="true" role="textbox"
+                aria-multiline="true" aria-label="Type your message"
                 data-placeholder="Напишіть повідомлення..."></div>
         </div>
-        <div class="etsy-ai-input-controls"><select id="model-select" class="etsy-ai-model-select"></select>
+        <div class="etsy-ai-input-controls">
+            <label for="model-select" class="sr-only">AI model</label>
+            <select id="model-select" class="etsy-ai-model-select" aria-label="AI model" style="display:none" aria-hidden="true" tabindex="-1"></select>
             <div class="etsy-ai-action-buttons">
-                <button id="generate-btn" class="etsy-ai-generate-btn" data-ai-tooltip="Suggest Response">✨</button>
-                <button id="send-btn" class="etsy-ai-send-btn" data-ai-tooltip="Send Message">➤</button>
+                <button id="generate-btn" class="etsy-ai-generate-btn" aria-label="Generate draft reply" data-ai-tooltip="Suggest Response">✨</button>
+                <button id="send-btn" class="etsy-ai-send-btn" aria-label="Send message" data-ai-tooltip="Send Message">➤</button>
             </div>
         </div>
     </div>
 </div>
-<div id="settings-overlay" class="etsy-ai-overlay">
+<div id="settings-overlay" class="etsy-ai-overlay" role="dialog" aria-modal="true" aria-labelledby="settings-dialog-title">
     <div class="etsy-ai-modal-card">
-        <h3>Settings</h3>
+        <h3 id="settings-dialog-title">Settings</h3>
         <div style="margin-bottom:15px">
-            <label style="display:block;margin-bottom:8px;font-size:13px;font-weight:500">🔑 Google Gemini API
+            <label for="gemini-api-key-input" style="display:block;margin-bottom:8px;font-size:13px;font-weight:500">🔑 Google Gemini API
                 Key</label>
-            <input type="text" id="gemini-api-key-input" placeholder="Enter Gemini API key..."
+            <input type="password" id="gemini-api-key-input" autocomplete="off" placeholder="Enter Gemini API key..."
                 style="width:100%;padding:10px;border:1px solid #E5E7EB;border-radius:8px;font-size:14px">
         </div>
         <div style="margin-bottom:15px">
-            <label style="display:block;margin-bottom:8px;font-size:13px;font-weight:500">🔑 DeepSeek API Key</label>
-            <input type="text" id="deepseek-api-key-input" placeholder="Enter DeepSeek API key..."
+            <label for="deepseek-api-key-input" style="display:block;margin-bottom:8px;font-size:13px;font-weight:500">🔑 DeepSeek API Key</label>
+            <input type="password" id="deepseek-api-key-input" autocomplete="off" placeholder="Enter DeepSeek API key..."
                 style="width:100%;padding:10px;border:1px solid #E5E7EB;border-radius:8px;font-size:14px">
         </div>
         <div style="margin-bottom:20px">
-            <label style="display:block;margin-bottom:8px;font-size:13px;font-weight:500">🔑 Grok API Key</label>
-            <input type="text" id="grok-api-key-input" placeholder="Enter Grok API key..."
+            <label for="grok-api-key-input" style="display:block;margin-bottom:8px;font-size:13px;font-weight:500">🔑 Grok API Key</label>
+            <input type="password" id="grok-api-key-input" autocomplete="off" placeholder="Enter Grok API key..."
                 style="width:100%;padding:10px;border:1px solid #E5E7EB;border-radius:8px;font-size:14px">
         </div>
         <div style="display:flex;justify-content:flex-end;gap:10px">
@@ -68,12 +76,13 @@
         </div>
     </div>
 </div>
-<div id="history-overlay" class="etsy-ai-overlay">
+<div id="history-overlay" class="etsy-ai-overlay" role="dialog" aria-modal="true" aria-labelledby="history-dialog-title">
     <div class="etsy-ai-modal-card">
         <div style="display:flex;justify-content:space-between;margin-bottom:10px">
-            <h3 style="margin:0">History</h3><button id="close-history"
+            <h3 id="history-dialog-title" style="margin:0">History</h3>
+            <button id="close-history" aria-label="Close history"
                 style="background:transparent;border:none;font-size:20px;cursor:pointer;color:#6B7280">✕</button>
         </div>
-        <div id="history-list" style="max-height:400px;overflow-y:auto"></div>
+        <div id="history-list" style="max-height:400px;overflow-y:auto" role="list"></div>
     </div>
 </div>

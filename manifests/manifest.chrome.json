@@ -1,7 +1,7 @@
 {
     "manifest_version": 3,
     "name": "Etsy AI Assistant",
-    "version": "1.5.0",
+    "version": "1.5.2",
     "description": "AI assistant integrated into Etsy pages",
     "permissions": [
         "scripting",
@@ -13,7 +13,8 @@
         "offscreen"
     ],
     "host_permissions": [
-        "https://www.etsy.com/*"
+        "https://www.etsy.com/*",
+        "https://openrouter.ai/*"
     ],
     "background": {
         "service_worker": "background/service_worker.js"
@@ -34,10 +35,12 @@
                 "content/etsy_context_interceptor.js",
                 "content/link_discovery.js",
                 "content/listing_editor_tracker.js",
+                "content/memory_manager.js",
                 "content/base_ai_service.js",
                 "content/providers/gemini_service.js",
                 "content/providers/deepseek_service.js",
                 "content/providers/grok_service.js",
+                "content/providers/openrouter_service.js",
                 "content/ai_service_factory.js",
                 "content/image_modal.js",
                 "content/chat_manager.js",

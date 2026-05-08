@@ -12,7 +12,7 @@ class AIServiceFactory {
 
     /**
      * Creates an instance of the appropriate AI service provider
-     * @param {string} providerId - Provider ID (gemini, deepseek, grok)
+     * @param {string} providerId - Provider ID (gemini, deepseek, grok, openrouter)
      * @returns {Promise<BaseAIService>} Instance of the provider service
      */
     static async createService(providerId) {
@@ -43,6 +43,12 @@ class AIServiceFactory {
                     throw new Error('GrokService not loaded');
                 }
                 return new window.GrokService();
+
+            case 'openrouter':
+                if (!window.OpenRouterService) {
+                    throw new Error('OpenRouterService not loaded');
+                }
+                return new window.OpenRouterService();
 
             default:
                 throw new Error(`No service implementation for provider: ${providerId}`);

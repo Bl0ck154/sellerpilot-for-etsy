@@ -12,7 +12,8 @@
         "alarms"
     ],
     "host_permissions": [
-        "https://www.etsy.com/*"
+        "https://www.etsy.com/*",
+        "https://openrouter.ai/*"
     ],
     "background": {
         "scripts": [
@@ -35,10 +36,12 @@
                 "content/etsy_context_interceptor.js",
                 "content/link_discovery.js",
                 "content/listing_editor_tracker.js",
+                "content/memory_manager.js",
                 "content/base_ai_service.js",
                 "content/providers/gemini_service.js",
                 "content/providers/deepseek_service.js",
                 "content/providers/grok_service.js",
+                "content/providers/openrouter_service.js",
                 "content/ai_service_factory.js",
                 "content/image_modal.js",
                 "content/chat_manager.js",

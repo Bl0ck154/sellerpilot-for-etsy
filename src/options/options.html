@@ -79,6 +79,55 @@
                 </div>
             </section>
 
+            <!-- OpenRouter API Key Section -->
+            <section class="settings-section">
+                <div class="setting-item setting-item-vertical">
+                    <div class="setting-info">
+                        <h2>🔑 OpenRouter API Key</h2>
+                        <p class="description">
+                            Enter your OpenRouter API key to access 6 free AI models with automatic fallback.
+                            <br>
+                            <small>Get your free API key from <a href="https://openrouter.ai/settings/keys"
+                                    target="_blank">OpenRouter</a> — no payment required</small>
+                        </p>
+                    </div>
+                    <div class="input-with-toggle">
+                        <input type="password" id="openrouterApiKeyInput" class="input-field"
+                            placeholder="Enter OpenRouter API key (sk-or-...)">
+                        <button type="button" class="toggle-visibility-btn" data-target="openrouterApiKeyInput"
+                            title="Show/Hide API Key">👁️</button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Agent Memory Section -->
+            <section class="settings-section">
+                <div class="setting-item setting-item-vertical">
+                    <div class="setting-info">
+                        <h2>🧠 Agent Memory</h2>
+                        <p class="description">
+                            Persistent facts the AI remembers about you and your shop. They're injected into every
+                            request.
+                            <br>
+                            <small>In chat, type <code>remember that …</code> or <code>запам'ятай що …</code> to add.
+                                Use <code>forget about …</code> or <code>забудь про …</code> to remove.</small>
+                        </p>
+                    </div>
+                    <div class="memory-panel">
+                        <ul id="memoryList" class="memory-list">
+                            <li class="memory-empty">No memory yet.</li>
+                        </ul>
+                        <div class="memory-add-row">
+                            <input type="text" id="memoryNewInput" class="input-field"
+                                placeholder="Add a new memory entry…" maxlength="500">
+                            <button type="button" id="memoryAddBtn" class="reset-btn">➕ Add</button>
+                        </div>
+                        <button type="button" id="memoryClearBtn" class="reset-btn memory-clear-btn">🗑️ Clear all
+                            memory</button>
+                    </div>
+                </div>
+            </section>
+
             <!-- Custom Instructions Section -->
             <section class="settings-section">
                 <div class="setting-item setting-item-vertical">
@@ -135,6 +184,7 @@
 
     <script src="../content/config.js"></script>
     <script src="../config/base_instruction.js"></script>
+    <script src="../content/memory_manager.js"></script>
     <script src="options.js"></script>
 </body>
 

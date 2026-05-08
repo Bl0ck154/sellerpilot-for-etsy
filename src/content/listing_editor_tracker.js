@@ -163,20 +163,40 @@ if (document.readyState === 'loading') {
     window.ListingEditorTracker.init();
 }
 
-// Watch for SPA navigation (Etsy uses client-side routing)
+// Watch for SPA navigation (Etsy uses client-side routing).
+// popstate/hashchange only fire for back/forward/anchor — Etsy's in-app clicks use
+// history.pushState, which fires nothing. Patch them so we re-init on every route change.
 let lastUrl = window.location.href;
 
-window.addEventListener('popstate', () => {
-    if (window.location.href !== lastUrl) {
-        lastUrl = window.location.href;
-        window.ListingEditorTracker.init();
-    }
-});
+function onUrlMaybeChanged() {
+    if (window.location.href === lastUrl) return;
+    lastUrl = window.location.href;
+    // Re-init picks up the new listing_id or cleans up if we navigated away.
+    window.ListingEditorTracker.cleanup();
+    window.ListingEditorTracker.init();
+}
 
-window.addEventListener('hashchange', () => {
-    if (window.location.href !== lastUrl) {
-        lastUrl = window.location.href;
-        window.ListingEditorTracker.init();
-    }
-});
+window.addEventListener('popstate', onUrlMaybeChanged);
+window.addEventListener('hashchange', onUrlMaybeChanged);
+
+// Patch pushState / replaceState once. Guard against double-patching if the script
+// somehow runs twice on the same page.
+if (!window.__etsyAiHistoryPatched) {
+    window.__etsyAiHistoryPatched = true;
+    const origPush = history.pushState;
+    const origReplace = history.replaceState;
+
+    history.pushState = function (...args) {
+        const ret = origPush.apply(this, args);
+        window.dispatchEvent(new Event('etsy-ai-locationchange'));
+        return ret;
+    };
+    history.replaceState = function (...args) {
+        const ret = origReplace.apply(this, args);
+        window.dispatchEvent(new Event('etsy-ai-locationchange'));
+        return ret;
+    };
+}
+
+window.addEventListener('etsy-ai-locationchange', onUrlMaybeChanged);
 

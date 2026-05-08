@@ -4,6 +4,7 @@ console.log('⚙️ Options page loaded');
 const geminiApiKeyInput = document.getElementById('geminiApiKeyInput');
 const deepseekApiKeyInput = document.getElementById('deepseekApiKeyInput');
 const grokApiKeyInput = document.getElementById('grokApiKeyInput');
+const openrouterApiKeyInput = document.getElementById('openrouterApiKeyInput');
 const customInstructionsTextarea = document.getElementById('customInstructions');
 const chatManagerToggle = document.getElementById('chatManagerToggle');
 const statusElement = document.getElementById('status');
@@ -68,7 +69,7 @@ async function loadSettings() {
     });
 
     // Load API keys for all providers
-    chrome.storage.local.get(['gemini_api_key', 'deepseek_api_key', 'grok_api_key'], (result) => {
+    chrome.storage.local.get(['gemini_api_key', 'deepseek_api_key', 'grok_api_key', 'openrouter_api_key'], (result) => {
         if (result.gemini_api_key) {
             geminiApiKeyInput.value = result.gemini_api_key;
             console.log('📖 Loaded Gemini API key');
@@ -80,6 +81,10 @@ async function loadSettings() {
         if (result.grok_api_key) {
             grokApiKeyInput.value = result.grok_api_key;
             console.log('📖 Loaded Grok API key');
+        }
+        if (result.openrouter_api_key) {
+            openrouterApiKeyInput.value = result.openrouter_api_key;
+            console.log('📖 Loaded OpenRouter API key');
         }
     });
 
@@ -132,6 +137,14 @@ function saveGrokApiKey() {
     chrome.storage.local.set({ grok_api_key: apiKey }, () => {
         console.log('💾 Grok API key saved');
         showStatus('Grok API Key saved');
+    });
+}
+
+function saveOpenRouterApiKey() {
+    const apiKey = openrouterApiKeyInput.value.trim();
+    chrome.storage.local.set({ openrouter_api_key: apiKey }, () => {
+        console.log('💾 OpenRouter API key saved');
+        showStatus('OpenRouter API Key saved');
     });
 }
 
@@ -193,10 +206,151 @@ chatManagerToggle.addEventListener('change', () => {
 geminiApiKeyInput.addEventListener('blur', saveGeminiApiKey);
 deepseekApiKeyInput.addEventListener('blur', saveDeepSeekApiKey);
 grokApiKeyInput.addEventListener('blur', saveGrokApiKey);
+openrouterApiKeyInput.addEventListener('blur', saveOpenRouterApiKey);
 
 // Auto-save custom instructions with debounce
 const debouncedSaveInstructions = debounce(saveCustomInstructions, 1000);
 customInstructionsTextarea.addEventListener('input', debouncedSaveInstructions);
 
+// =====================
+// Agent Memory section
+// =====================
+const memoryListEl = document.getElementById('memoryList');
+const memoryNewInput = document.getElementById('memoryNewInput');
+const memoryAddBtn = document.getElementById('memoryAddBtn');
+const memoryClearBtn = document.getElementById('memoryClearBtn');
+
+function formatMemoryDate(ts) {
+    if (!ts) return '';
+    const d = new Date(ts);
+    return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+async function renderMemoryList() {
+    if (!window.MemoryManager) {
+        memoryListEl.innerHTML = '<li class="memory-empty">Memory module not loaded.</li>';
+        return;
+    }
+    const entries = await window.MemoryManager.list();
+    memoryListEl.innerHTML = '';
+    if (!entries.length) {
+        memoryListEl.innerHTML = '<li class="memory-empty">No memory yet.</li>';
+        return;
+    }
+    for (const entry of entries) {
+        const li = document.createElement('li');
+        li.className = 'memory-item';
+        li.dataset.id = entry.id;
+
+        const textEl = document.createElement('div');
+        textEl.className = 'memory-item-text';
+        textEl.textContent = entry.text;
+
+        const dateEl = document.createElement('div');
+        dateEl.className = 'memory-item-date';
+        dateEl.textContent = formatMemoryDate(entry.updatedAt || entry.createdAt);
+        dateEl.title = 'Created: ' + formatMemoryDate(entry.createdAt) +
+            (entry.updatedAt ? '\nUpdated: ' + formatMemoryDate(entry.updatedAt) : '');
+
+        const actions = document.createElement('div');
+        actions.className = 'memory-item-actions';
+
+        const editBtn = document.createElement('button');
+        editBtn.type = 'button';
+        editBtn.className = 'memory-icon-btn';
+        editBtn.title = 'Edit';
+        editBtn.textContent = '✏️';
+        editBtn.addEventListener('click', () => startEditMemory(entry.id, textEl));
+
+        const delBtn = document.createElement('button');
+        delBtn.type = 'button';
+        delBtn.className = 'memory-icon-btn';
+        delBtn.title = 'Delete';
+        delBtn.textContent = '🗑️';
+        delBtn.addEventListener('click', () => deleteMemory(entry.id));
+
+        actions.append(editBtn, delBtn);
+        li.append(textEl, dateEl, actions);
+        memoryListEl.appendChild(li);
+    }
+}
+
+function startEditMemory(id, textEl) {
+    const original = textEl.textContent;
+    textEl.contentEditable = 'true';
+    textEl.focus();
+
+    // Select all text for easy replacement
+    const range = document.createRange();
+    range.selectNodeContents(textEl);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+
+    const commit = async () => {
+        textEl.removeEventListener('blur', commit);
+        textEl.removeEventListener('keydown', onKey);
+        textEl.contentEditable = 'false';
+        const newText = textEl.textContent.trim();
+        if (!newText || newText === original) {
+            textEl.textContent = original;
+            return;
+        }
+        const ok = await window.MemoryManager.update(id, newText);
+        if (!ok) textEl.textContent = original;
+        else showStatus('Memory updated');
+        renderMemoryList();
+    };
+
+    const onKey = (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); textEl.blur(); }
+        if (e.key === 'Escape') { textEl.textContent = original; textEl.blur(); }
+    };
+
+    textEl.addEventListener('blur', commit);
+    textEl.addEventListener('keydown', onKey);
+}
+
+async function deleteMemory(id) {
+    await window.MemoryManager.removeById(id);
+    showStatus('Memory entry deleted');
+    renderMemoryList();
+}
+
+async function addMemoryFromInput() {
+    const text = memoryNewInput.value.trim();
+    if (!text) return;
+    const res = await window.MemoryManager.add(text);
+    if (!res) return;
+    memoryNewInput.value = '';
+    showStatus(res.duplicate ? 'Already remembered' : 'Memory added');
+    renderMemoryList();
+}
+
+async function clearAllMemory() {
+    if (!confirm('Clear ALL memory entries? This cannot be undone.')) return;
+    await window.MemoryManager.clear();
+    showStatus('Memory cleared');
+    renderMemoryList();
+}
+
+if (memoryAddBtn) memoryAddBtn.addEventListener('click', addMemoryFromInput);
+if (memoryClearBtn) memoryClearBtn.addEventListener('click', clearAllMemory);
+if (memoryNewInput) {
+    memoryNewInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); addMemoryFromInput(); }
+    });
+}
+
+// Keep list in sync if modified elsewhere (e.g. from chat "remember that …")
+if (chrome?.storage?.onChanged) {
+    chrome.storage.onChanged.addListener((changes, namespace) => {
+        if (namespace === 'local' && window.MemoryManager && changes[window.MemoryManager.STORAGE_KEY]) {
+            renderMemoryList();
+        }
+    });
+}
+
 // Initial load
 loadSettings();
+renderMemoryList();

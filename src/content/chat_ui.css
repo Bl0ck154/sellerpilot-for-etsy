@@ -1,5 +1,18 @@
 /* Floating Chat UI for Etsy AI Assistant */
 
+/* Screen-reader-only utility — hides visually but keeps accessible */
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
 /* CSS Variables */
 :root {
     --primary-color: #F1641E;
@@ -8,7 +21,7 @@
     --bg-color: #FFFFFF;
     --chat-bg: #F9FAFB;
     --text-color: #1F2937;
-    --text-muted: #6B7280;
+    --text-muted: #4B5563;
     --border-color: #E5E7EB;
     --user-msg-bg: #F1641E;
     --ai-msg-bg: #F3F4F6;
@@ -314,7 +327,7 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    color: #6B7280;
+    color: #4B5563;
     padding: 0;
 }
 
@@ -475,8 +488,8 @@
 }
 
 .etsy-ai-timestamp {
-    font-size: 10px;
-    opacity: 0.6;
+    font-size: 12px;
+    color: #6B7280;
     margin-top: 4px;
     display: block;
     text-align: right;
@@ -599,11 +612,16 @@
     border: 1px solid var(--border-color);
     padding: 4px 8px;
     border-radius: 6px;
-    font-size: 11px;
+    font-size: 12px;
     outline: none;
     cursor: pointer;
     font-family: inherit;
     font-weight: 500;
+}
+
+.etsy-ai-model-select:focus-visible {
+    outline: 2px solid var(--primary-color);
+    outline-offset: 2px;
 }
 
 .etsy-ai-action-buttons {
@@ -720,7 +738,7 @@
     background: transparent;
     border: none;
     cursor: pointer;
-    color: #9CA3AF;
+    color: #4B5563;
     font-size: 16px;
     padding: 2px 6px;
     border-radius: 4px;
@@ -734,7 +752,7 @@
 
 .history-item-meta {
     font-size: 11px;
-    color: #6B7280;
+    color: #4B5563;
     display: flex;
     gap: 12px;
 }
@@ -742,7 +760,7 @@
 .history-empty {
     text-align: center;
     padding: 40px 20px;
-    color: #6B7280;
+    color: #4B5563;
     font-size: 14px;
 }
 
@@ -750,7 +768,7 @@
 .history-group-header {
     font-weight: 600;
     font-size: 12px;
-    color: #6B7280;
+    color: #4B5563;
     padding: 12px 16px 8px 16px;
     text-transform: uppercase;
     letter-spacing: 0.5px;
@@ -810,11 +828,16 @@
     border: 1px solid var(--border-color);
     padding: 4px 8px;
     border-radius: 6px;
-    font-size: 11px;
+    font-size: 12px;
     outline: none;
     cursor: pointer;
     font-family: inherit;
     font-weight: 500;
+}
+
+.etsy-ai-model-select:focus-visible {
+    outline: 2px solid var(--primary-color);
+    outline-offset: 2px;
 }
 
 .etsy-ai-action-buttons {
@@ -931,7 +954,7 @@
     background: transparent;
     border: none;
     cursor: pointer;
-    color: #9CA3AF;
+    color: #4B5563;
     font-size: 16px;
     padding: 2px 6px;
     border-radius: 4px;
@@ -945,7 +968,7 @@
 
 .history-item-meta {
     font-size: 11px;
-    color: #6B7280;
+    color: #4B5563;
     display: flex;
     gap: 12px;
 }
@@ -953,7 +976,7 @@
 .history-empty {
     text-align: center;
     padding: 40px 20px;
-    color: #6B7280;
+    color: #4B5563;
     font-size: 14px;
 }
 
@@ -1024,4 +1047,15 @@
     margin: 10px 0;
     font-weight: 500;
     letter-spacing: 0.5px;
+}
+
+/* Respect reduced-motion preference — disable all decorative animations */
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
 }

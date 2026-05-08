@@ -374,6 +374,24 @@ function initChat() {
         }
     }
 
+    async function appendAiDiagnostic(entry) {
+        if (!chrome.runtime?.id) return;
+
+        try {
+            const result = await chrome.storage.local.get(['AI_DIAGNOSTICS']);
+            const diagnostics = Array.isArray(result.AI_DIAGNOSTICS) ? result.AI_DIAGNOSTICS : [];
+            diagnostics.push({
+                ts: new Date().toISOString(),
+                ...entry
+            });
+            await chrome.storage.local.set({
+                AI_DIAGNOSTICS: diagnostics.slice(-20)
+            });
+        } catch (error) {
+            console.warn('Failed to write AI diagnostics:', error);
+        }
+    }
+
     let aiService = null; // Will be loaded dynamically via factory
 
     let CONFIG = {
@@ -417,6 +435,13 @@ function initChat() {
     // --- INITIALIZATION ---
     // DOM is already ready, call init functions directly
     (async () => {
+        // Immediate page-title fallback so the header never stays blank while we wait
+        // for content.js to broadcast parsed context.
+        if (ELEMENTS.pageTitle && !ELEMENTS.pageTitle.textContent.trim()) {
+            ELEMENTS.pageTitle.textContent = document.title || 'Etsy';
+            ELEMENTS.pageTitle.title = location.href;
+        }
+
         // Check if extension context is valid BEFORE doing anything
         if (!chrome.runtime?.id) {
             console.error('🔴 Extension context invalidated - extension was reloaded/updated');
@@ -444,30 +469,22 @@ function initChat() {
     // --- CONFIGURATION ---
     async function loadConfiguration() {
         // 1. Load models from config.js (window.ETSY_AI_CONFIG) - now using providers
-        if (window.ETSY_AI_CONFIG && window.ETSY_AI_CONFIG.providers) {
-            // Flatten all models from all providers for backward compatibility with UI
-            CONFIG.models = [];
-            window.ETSY_AI_CONFIG.providers.forEach(provider => {
-                provider.models.forEach(model => {
-                    CONFIG.models.push({
-                        id: model.id,
-                        name: model.name, // Just model name, without provider prefix
-                        provider: provider.id
-                    });
-                });
-            });
-
-            populateModelDropdown();
-        } else {
+        // Drop the early populate — will be called after keys are loaded (see step 2)
+        if (!window.ETSY_AI_CONFIG?.providers) {
             // Fallback if config.js not loaded
             CONFIG.models = [
                 { id: "gemini-3-flash-preview", name: "Gemini 3.0 Flash", provider: "gemini" }
             ];
-            populateModelDropdown();
+            ELEMENTS.modelSelect.innerHTML = '';
+            const opt = document.createElement('option');
+            opt.value = CONFIG.models[0].id;
+            opt.dataset.provider = 'gemini';
+            opt.textContent = CONFIG.models[0].name;
+            ELEMENTS.modelSelect.appendChild(opt);
         }
 
         // 2. Load API keys from Storage - now checking all providers
-        const result = await safeStorageGet(['selected_provider', 'gemini_api_key', 'deepseek_api_key', 'grok_api_key', 'preferred_model']);
+        const result = await safeStorageGet(['selected_provider', 'gemini_api_key', 'deepseek_api_key', 'grok_api_key', 'openrouter_api_key', 'preferred_model']);
         if (!result) {
             // Extension context invalidated - storage unavailable
             console.error('⚠️ Storage unavailable - extension context may be invalid');
@@ -479,22 +496,38 @@ function initChat() {
         const availableKeys = {
             gemini: result.gemini_api_key || null,
             deepseek: result.deepseek_api_key || null,
-            grok: result.grok_api_key || null
+            grok: result.grok_api_key || null,
+            openrouter: result.openrouter_api_key || null
         };
 
         if (result.gemini_api_key) {
             CONFIG.apiKeys.google = result.gemini_api_key;
         }
 
-        // Check if at least one API key is configured
-        const hasAnyKey = Object.values(availableKeys).some(key => key && key.trim());
+        // OpenRouter always has a built-in key — always counts as having an available provider
+        const hasAnyKey = PROVIDERS_WITH_BUILTIN_KEY.size > 0 ||
+            Object.values(availableKeys).some(key => key && key.trim());
+
+        // Repopulate with key info available (to filter out providers without keys)
+        populateModelDropdown(availableKeys);
+
+        // Restore previously selected model if it exists in the current dropdown
+        if (result.preferred_model) {
+            ELEMENTS.modelSelect.value = result.preferred_model;
+            // If value didn't match any option, fall through to detection below
+            if (ELEMENTS.modelSelect.value !== result.preferred_model) {
+                // Stored model not in dropdown (provider removed/no key) — pick a default
+                result.preferred_model = null;
+            }
+        }
 
         // 3. Set default model - prefer one with available API key
         if (!result.preferred_model) {
             let selectedModel = null;
 
             // Try to find a model with an available API key
-            if (window.ETSY_AI_CONFIG?.defaultProvider && availableKeys[window.ETSY_AI_CONFIG.defaultProvider]) {
+            if (window.ETSY_AI_CONFIG?.defaultProvider &&
+                (availableKeys[window.ETSY_AI_CONFIG.defaultProvider] || window.ETSY_AI_CONFIG.defaultProvider === 'openrouter')) {
                 const defaultProvider = window.ETSY_AI_CONFIG.providers.find(p => p.id === window.ETSY_AI_CONFIG.defaultProvider);
                 if (defaultProvider && defaultProvider.defaultModel) {
                     selectedModel = defaultProvider.defaultModel;
@@ -502,7 +535,7 @@ function initChat() {
             } else {
                 // Find first provider with an available key
                 for (const provider of window.ETSY_AI_CONFIG.providers) {
-                    if (availableKeys[provider.id]) {
+                    if (availableKeys[provider.id] || provider.id === 'openrouter') {
                         selectedModel = provider.defaultModel;
                         break;
                     }
@@ -530,14 +563,49 @@ function initChat() {
         }
     }
 
-    function populateModelDropdown() {
+    // Providers that always work without a user-supplied key (have a built-in key)
+    const PROVIDERS_WITH_BUILTIN_KEY = new Set(['openrouter']);
+
+    function populateModelDropdown(availableKeys = {}) {
         ELEMENTS.modelSelect.innerHTML = "";
-        CONFIG.models.forEach(model => {
-            const option = document.createElement('option');
-            option.value = model.id;
-            option.dataset.provider = model.provider;
-            option.textContent = model.name;
-            ELEMENTS.modelSelect.appendChild(option);
+
+        if (!window.ETSY_AI_CONFIG?.providers) return;
+
+        window.ETSY_AI_CONFIG.providers.forEach(provider => {
+            // Skip providers without a key and without a built-in key
+            const hasKey = availableKeys[provider.id] ||
+                PROVIDERS_WITH_BUILTIN_KEY.has(provider.id);
+            if (!hasKey) return;
+
+            if (provider.models.length === 1) {
+                // Single-model provider → flat option
+                const model = provider.models[0];
+                const option = document.createElement('option');
+                option.value = model.id;
+                option.dataset.provider = provider.id;
+                option.textContent = `${provider.name} — ${model.name}`;
+                ELEMENTS.modelSelect.appendChild(option);
+            } else {
+                // Multi-model provider → optgroup
+                const group = document.createElement('optgroup');
+                group.label = provider.name;
+                provider.models.forEach(model => {
+                    const option = document.createElement('option');
+                    option.value = model.id;
+                    option.dataset.provider = provider.id;
+                    option.textContent = model.name;
+                    group.appendChild(option);
+                });
+                ELEMENTS.modelSelect.appendChild(group);
+            }
+        });
+
+        // Sync CONFIG.models for backward compat (used elsewhere)
+        CONFIG.models = [];
+        window.ETSY_AI_CONFIG.providers.forEach(provider => {
+            provider.models.forEach(model => {
+                CONFIG.models.push({ id: model.id, name: model.name, provider: provider.id });
+            });
         });
     }
 
@@ -600,11 +668,11 @@ function initChat() {
             const selectedModelId = ELEMENTS.modelSelect.value;
             await safeStorageSet({ 'preferred_model': selectedModelId });
 
-            // Check if selected model has API key
+            // Check if selected model has API key — skip for providers with built-in key
             const selectedOption = ELEMENTS.modelSelect.options[ELEMENTS.modelSelect.selectedIndex];
             const providerId = selectedOption ? selectedOption.dataset.provider : null;
 
-            if (providerId) {
+            if (providerId && !PROVIDERS_WITH_BUILTIN_KEY.has(providerId)) {
                 const apiKey = await window.AIServiceFactory.getApiKey(providerId);
 
                 if (!apiKey || !apiKey.trim()) {
@@ -886,13 +954,25 @@ function initChat() {
         const selectedOption = ELEMENTS.modelSelect.options[ELEMENTS.modelSelect.selectedIndex];
         const provider = selectedOption ? selectedOption.dataset.provider : "gemini";
 
-        // Get API key for the provider
-        try {
-            const apiKey = await window.AIServiceFactory.getApiKey(provider);
+        // Get API key for the provider (skip check for providers with built-in key)
+        if (!PROVIDERS_WITH_BUILTIN_KEY.has(provider)) {
+            try {
+                const apiKey = await window.AIServiceFactory.getApiKey(provider);
 
-            if (!apiKey || !apiKey.trim()) {
-                console.warn('⚠️ No API key found for provider:', provider);
-                // Re-enable buttons since we're returning early
+                if (!apiKey || !apiKey.trim()) {
+                    console.warn('⚠️ No API key found for provider:', provider);
+                    ELEMENTS.sendBtn.disabled = false;
+                    ELEMENTS.sendBtn.style.opacity = '1';
+                    ELEMENTS.sendBtn.style.cursor = 'pointer';
+                    ELEMENTS.sendBtn.style.pointerEvents = 'auto';
+                    ELEMENTS.generateBtn.disabled = false;
+                    ELEMENTS.generateBtn.style.opacity = '1';
+                    ELEMENTS.generateBtn.style.pointerEvents = 'auto';
+                    openSettingsForProvider(provider);
+                    return;
+                }
+            } catch (e) {
+                console.error('Failed to get API key:', e);
                 ELEMENTS.sendBtn.disabled = false;
                 ELEMENTS.sendBtn.style.opacity = '1';
                 ELEMENTS.sendBtn.style.cursor = 'pointer';
@@ -900,23 +980,9 @@ function initChat() {
                 ELEMENTS.generateBtn.disabled = false;
                 ELEMENTS.generateBtn.style.opacity = '1';
                 ELEMENTS.generateBtn.style.pointerEvents = 'auto';
-                // Open settings with focus on the specific provider
-                openSettingsForProvider(provider);
-                // DON'T clear input - let user try again after adding key
+                addMessage("⚠️ Extension error. Please refresh the page.", "system");
                 return;
             }
-        } catch (e) {
-            console.error('Failed to get API key:', e);
-            // Re-enable buttons since we're returning early
-            ELEMENTS.sendBtn.disabled = false;
-            ELEMENTS.sendBtn.style.opacity = '1';
-            ELEMENTS.sendBtn.style.cursor = 'pointer';
-            ELEMENTS.sendBtn.style.pointerEvents = 'auto';
-            ELEMENTS.generateBtn.disabled = false;
-            ELEMENTS.generateBtn.style.opacity = '1';
-            ELEMENTS.generateBtn.style.pointerEvents = 'auto';
-            addMessage("⚠️ Extension error. Please refresh the page.", "system");
-            return;
         }
 
         // Clear input only after validation passes
@@ -960,13 +1026,17 @@ function initChat() {
                 throw new Error('Failed to initialize AI service');
             }
 
-            // Get API key and model for current provider  
-            const providerApiKey = await window.AIServiceFactory.getApiKey(provider);
-            const providerModelId = await window.AIServiceFactory.getModelId(provider);
-
-            if (!providerApiKey) {
-                throw new Error(`No API key configured for provider: ${provider}`);
+            // Get API key for the current provider
+            // For providers with built-in keys (e.g. OpenRouter), pass null — the service handles it internally
+            let providerApiKey = null;
+            if (!PROVIDERS_WITH_BUILTIN_KEY.has(provider)) {
+                providerApiKey = await window.AIServiceFactory.getApiKey(provider);
+                if (!providerApiKey) {
+                    throw new Error(`No API key configured for provider: ${provider}`);
+                }
             }
+
+            const providerModelId = await window.AIServiceFactory.getModelId(provider);
 
             // Build conversation history for multi-turn chat from global storage
             const conversationHistory = await aiService.buildConversationHistory('global_chat', userMessageText);
@@ -1008,6 +1078,19 @@ function initChat() {
             return; // Keep text in input, don't clear
         }
 
+        // Memory commands ("запам'ятай…", "забудь…") are handled locally — no AI call.
+        if (window.MemoryManager) {
+            const cmd = window.MemoryManager.detectCommand(text);
+            if (cmd) {
+                ELEMENTS.userInput.innerText = "";
+                handleMemoryCommand(text, cmd).catch(err => {
+                    console.error('MemoryManager error:', err);
+                    renderMessage(`❌ Memory error: ${err.message || err}`, "system");
+                });
+                return;
+            }
+        }
+
         // Disable buttons IMMEDIATELY to prevent double-clicks during lag
         ELEMENTS.sendBtn.disabled = true;
         ELEMENTS.sendBtn.style.opacity = '0.5';
@@ -1018,6 +1101,37 @@ function initChat() {
         ELEMENTS.generateBtn.style.pointerEvents = 'none';
 
         handleChatInteraction(text);
+    }
+
+    async function handleMemoryCommand(originalText, cmd) {
+        addMessage(originalText, "user");
+        await saveChatToStorage(originalText, "user");
+
+        let reply = '';
+        try {
+            if (cmd.action === 'add') {
+                const res = await window.MemoryManager.add(cmd.text);
+                if (!res) reply = "⚠️ Не зміг зберегти — порожній факт.";
+                else if (res.duplicate) reply = `ℹ️ Вже пам'ятаю: "${res.entry.text}"`;
+                else reply = `💾 Запам'ятав: "${res.entry.text}"`;
+            } else if (cmd.action === 'remove') {
+                const res = await window.MemoryManager.removeByKeyword(cmd.keyword);
+                if (res.removed === 0) {
+                    reply = `🤔 Не знайшов у пам'яті нічого про "${cmd.keyword}".`;
+                } else {
+                    const preview = res.entries.map(e => `• ${e.text}`).join('\n');
+                    reply = `🗑️ Видалив (${res.removed}):\n${preview}`;
+                }
+            } else if (cmd.action === 'clear') {
+                await window.MemoryManager.clear();
+                reply = "🗑️ Всю пам'ять очищено.";
+            }
+        } catch (e) {
+            reply = `❌ Помилка пам'яті: ${e.message || e}`;
+        }
+
+        addMessage(reply, "system");
+        await saveChatToStorage(reply, "system");
     }
 
     // --- UTILS ---
@@ -1393,6 +1507,15 @@ function initChat() {
     // Обгортка для streaming AI відповіді з UI оновленнями
     async function streamAIResponse(modelId, apiKey, conversationHistory, systemInstruction) {
         let aiMsgDiv = null;
+        const startedAt = Date.now();
+        let finalText = '';
+        const diagnosticBase = {
+            provider: aiService?.getProviderName?.() || 'unknown',
+            modelId,
+            pageScope: systemInstruction.match(/\[PAGE_SCOPE:([^\]]+)\]/)?.[1]?.trim() || null,
+            historyMessages: conversationHistory.length,
+            promptChars: systemInstruction.length + conversationHistory.reduce((sum, msg) => sum + (msg.content?.length || 0), 0)
+        };
 
         try {
             // Create AI message div for streaming
@@ -1406,6 +1529,7 @@ function initChat() {
             // Callbacks для обробки streaming
             let firstChunk = true;
             const onChunk = (chunkText, fullText) => {
+                finalText = fullText;
                 if (firstChunk) {
                     // Прибираємо loading (той, що був створений в handleChatInteraction), показуємо реальний div
                     removeLoadingMessage();
@@ -1419,6 +1543,7 @@ function initChat() {
             };
 
             const onComplete = async (fullText) => {
+                finalText = fullText;
                 // Finalize message
                 aiMsgDiv.id = ''; // Remove streaming ID
                 const timestamp = document.createElement('span');
@@ -1462,7 +1587,24 @@ function initChat() {
                 onComplete,
                 onError
             });
+
+            await appendAiDiagnostic({
+                ...diagnosticBase,
+                durationMs: Date.now() - startedAt,
+                ok: true,
+                responseChars: finalText.length,
+                attempts: aiService?.lastRequestDiagnostics?.attempts || null
+            });
         } catch (error) {
+            await appendAiDiagnostic({
+                ...diagnosticBase,
+                durationMs: Date.now() - startedAt,
+                ok: false,
+                responseChars: finalText.length,
+                error: error?.message || String(error),
+                attempts: aiService?.lastRequestDiagnostics?.attempts || null
+            });
+
             // Ensure cleanup on ANY error
             removeLoadingMessage();
 
