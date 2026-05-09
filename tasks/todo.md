@@ -299,5 +299,5 @@
 ## План
 - [x] Підняти extension version до `1.6.4` для Shop Intelligence release.
 - [x] Перевірити syntax/JSON/build і built manifests.
-- [ ] Commit і push version bump.
+- [x] Commit і push version bump.
 - [ ] Запустити Edge Add-ons workflow з `publish=true`.
