@@ -410,6 +410,7 @@ function initChat() {
 
     const ELEMENTS = {
         statusDot: document.getElementById('connection-status'),
+        versionLabel: document.getElementById('extension-version'),
         pageTitle: document.getElementById('page-title'), // New element
         chatBox: document.getElementById('chat-box'),
         userInput: document.getElementById('user-input'),
@@ -445,6 +446,10 @@ function initChat() {
         if (ELEMENTS.pageTitle && !ELEMENTS.pageTitle.textContent.trim()) {
             ELEMENTS.pageTitle.textContent = document.title || 'Etsy';
             ELEMENTS.pageTitle.title = location.href;
+        }
+
+        if (ELEMENTS.versionLabel) {
+            ELEMENTS.versionLabel.textContent = `v${chrome.runtime.getManifest().version}`;
         }
 
         // Check if extension context is valid BEFORE doing anything
@@ -1105,6 +1110,10 @@ function initChat() {
 
             const providerModelId = await window.AIServiceFactory.getModelId(provider);
 
+            const imageIntelMetadata = isSystemAction && window.ImageIntelligenceManager
+                ? await window.ImageIntelligenceManager.analyzeCurrentCustomerImages({ onStatus: showAiStatus })
+                : (window.ImageIntelligenceManager ? window.ImageIntelligenceManager.getMetadata() : {});
+
             // Build conversation history for multi-turn chat from global storage
             const conversationHistory = await aiService.buildConversationHistory('global_chat', userMessageText);
             const { systemInstruction } = await aiService.constructPromptData(CURRENT_CONTEXT, userMessageText);
@@ -1124,7 +1133,8 @@ function initChat() {
             // Pass messages instead of contents to be provider-agnostic
             await streamAIResponse(providerModelId, providerApiKey, conversationHistory, systemInstruction, {
                 ...promptMetadata,
-                ...shopIntelMetadata
+                ...shopIntelMetadata,
+                ...imageIntelMetadata
             });
 
         } catch (e) {
@@ -1747,6 +1757,9 @@ function initChat() {
             shopIntelSources: promptMetadata.shopIntelSources || [],
             shopIntelActive: !!promptMetadata.shopIntelActive,
             shopIntelReason: promptMetadata.shopIntelReason || null,
+            imageIntelCount: promptMetadata.imageIntelCount || 0,
+            imageIntelAnalyzedThisRequest: promptMetadata.imageIntelAnalyzedThisRequest || 0,
+            imageIntelErrors: promptMetadata.imageIntelErrors || [],
             historyMessages: conversationHistory.length,
             promptChars: systemInstruction.length + conversationHistory.reduce((sum, msg) => sum + (msg.content?.length || 0), 0)
         };

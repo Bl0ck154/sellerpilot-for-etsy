@@ -73,6 +73,7 @@ When you interact with the AI:
 - Main content of the page (extracted using Mozilla's Readability library)
 - Your message
 - Previous conversation context
+- Customer-side image attachments from the current Etsy conversation may be sent to Gemini for image-aware draft replies when you use Generate Draft. The Extension stores only text summaries of image analysis, not raw images.
 
 This data is sent **directly** to the AI provider's API endpoint via HTTPS. The Extension developer has **no access** to this data.
 

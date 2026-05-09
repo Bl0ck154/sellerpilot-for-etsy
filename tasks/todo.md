@@ -301,3 +301,16 @@
 - [x] Перевірити syntax/JSON/build і built manifests.
 - [x] Commit і push version bump.
 - [ ] Запустити Edge Add-ons workflow з `publish=true`.
+
+---
+
+# Фаза 26 — Customer image intelligence + version label (2026-05-09)
+
+## План
+- [x] Дослідити існуючу логіку attachments/download buttons і структуру Etsy chat messages.
+- [x] Додати image intelligence manager: тільки customer-side image attachments, Gemini Vision summary, cache, no raw image storage.
+- [x] Інтегрувати on-demand image analysis перед `Suggest Response` зі status message і prompt section.
+- [x] Додати diagnostics image metadata.
+- [x] Додати малий version label у header агента.
+- [x] Оновити privacy note щодо image attachments.
+- [x] Перевірити syntax/build/prompt budget, commit і push.
