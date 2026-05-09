@@ -314,3 +314,13 @@
 - [x] Додати малий version label у header агента.
 - [x] Оновити privacy note щодо image attachments.
 - [x] Перевірити syntax/build/prompt budget, commit і push.
+
+---
+
+# Фаза 27 — Release image intelligence to Edge (2026-05-09)
+
+## План
+- [x] Підняти extension version до `1.6.5` для image intelligence release.
+- [x] Перевірити syntax/build і built manifests.
+- [ ] Commit і push version bump.
+- [ ] Запустити Edge Add-ons workflow з `publish=true`.
