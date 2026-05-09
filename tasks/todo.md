@@ -291,3 +291,13 @@
 - [x] Тригерити bootstrap на startup/context/conversation events, але throttled/debounced.
 - [x] Додати diagnostics metadata: shop intelligence version/age/sources.
 - [x] Перевірити syntax/build/prompt size, commit і push.
+
+---
+
+# Фаза 25 — Release Shop Intelligence to Edge (2026-05-08)
+
+## План
+- [x] Підняти extension version до `1.6.4` для Shop Intelligence release.
+- [x] Перевірити syntax/JSON/build і built manifests.
+- [ ] Commit і push version bump.
+- [ ] Запустити Edge Add-ons workflow з `publish=true`.
