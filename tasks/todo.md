@@ -322,5 +322,5 @@
 ## План
 - [x] Підняти extension version до `1.6.5` для image intelligence release.
 - [x] Перевірити syntax/build і built manifests.
-- [ ] Commit і push version bump.
+- [x] Commit і push version bump.
 - [ ] Запустити Edge Add-ons workflow з `publish=true`.
