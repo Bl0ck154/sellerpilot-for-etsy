@@ -324,3 +324,12 @@
 - [x] Перевірити syntax/build і built manifests.
 - [x] Commit і push version bump.
 - [ ] Запустити Edge Add-ons workflow з `publish=true`.
+
+---
+
+# Фаза 28 — Fix Etsy compose draft restore (2026-05-09)
+
+## План
+- [x] Заблокувати повторне збереження щойно відправленого тексту як draft після Send/Enter.
+- [x] Видаляти draft і suppress input saves на коротке вікно після відправки, поки Etsy очищає textarea.
+- [x] Перевірити syntax/build, commit і push.

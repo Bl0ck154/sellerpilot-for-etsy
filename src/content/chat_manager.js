@@ -8,6 +8,7 @@
     const KEY_L = 'etsy_clean_left';
     const KEY_R = 'etsy_clean_right';
     const KEY_H = 'etsy_clean_input_height';
+    const DRAFT_SUPPRESS_MS = 8000;
 
     let styleElement = null;
     let isInitialized = false;
@@ -379,7 +380,9 @@
                 // Видаляємо draft НЕГАЙНО
                 localStorage.removeItem('draft_' + id);
                 // Зберігаємо timestamp відправки
-                localStorage.setItem('sent_' + id, Date.now().toString());
+                const now = Date.now();
+                localStorage.setItem('sent_' + id, now.toString());
+                localStorage.setItem('draft_suppress_until_' + id, (now + DRAFT_SUPPRESS_MS).toString());
             }
         };
 
@@ -754,8 +757,11 @@
             const id = m[1];
 
             if (!area.dataset.saved) {
-                const savedDraft = localStorage.getItem('draft_' + id);
+                const draftKey = 'draft_' + id;
+                const suppressKey = 'draft_suppress_until_' + id;
+                const savedDraft = localStorage.getItem(draftKey);
                 const lastSentTime = localStorage.getItem('sent_' + id);
+                const suppressUntil = parseInt(localStorage.getItem(suppressKey) || '0', 10);
 
                 // Відновлюємо draft ТІЛЬКИ якщо:
                 // 1. Draft існує
@@ -763,7 +769,9 @@
                 if (savedDraft) {
                     let shouldRestore = true;
 
-                    if (lastSentTime) {
+                    if (Date.now() < suppressUntil) {
+                        shouldRestore = false;
+                    } else if (lastSentTime) {
                         // Перевіряємо: чи поле вже порожнє (Etsy очистив після відправки)
                         // Якщо порожнє - це означає що повідомлення вже відправлене
                         if (area.value.trim() === '') {
@@ -776,17 +784,24 @@
                         area.dispatchEvent(new Event('input', { bubbles: true }));
                     } else {
                         // Якщо не відновлюємо - видаляємо старий draft
-                        localStorage.removeItem('draft_' + id);
+                        localStorage.removeItem(draftKey);
                     }
                 }
 
                 // Зберігаємо draft при кожному введенні
                 area.oninput = (e) => {
                     const text = e.target.value;
+                    const activeSuppressUntil = parseInt(localStorage.getItem(suppressKey) || '0', 10);
+                    if (Date.now() < activeSuppressUntil) {
+                        localStorage.removeItem(draftKey);
+                        if (text.trim() === '') localStorage.removeItem(suppressKey);
+                        return;
+                    }
+
                     if (text.trim() !== '') {
-                        localStorage.setItem('draft_' + id, text);
+                        localStorage.setItem(draftKey, text);
                     } else {
-                        localStorage.removeItem('draft_' + id);
+                        localStorage.removeItem(draftKey);
                     }
                 };
 
