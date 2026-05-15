@@ -333,3 +333,13 @@
 - [x] Заблокувати повторне збереження щойно відправленого тексту як draft після Send/Enter.
 - [x] Видаляти draft і suppress input saves на коротке вікно після відправки, поки Etsy очищає textarea.
 - [x] Перевірити syntax/build, commit і push.
+
+---
+
+# Фаза 29 — Exact sent-text draft guard (2026-05-09)
+
+## План
+- [x] Замінити грубий time suppress на exact sent text guard.
+- [x] Не зберігати draft тільки коли textarea дорівнює щойно відправленому тексту.
+- [x] Дозволити новий draft одразу після send, якщо текст відрізняється.
+- [x] Перевірити syntax/build, commit і push.

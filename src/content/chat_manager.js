@@ -8,7 +8,7 @@
     const KEY_L = 'etsy_clean_left';
     const KEY_R = 'etsy_clean_right';
     const KEY_H = 'etsy_clean_input_height';
-    const DRAFT_SUPPRESS_MS = 8000;
+    const SENT_TEXT_GUARD_MS = 5 * 60 * 1000;
 
     let styleElement = null;
     let isInitialized = false;
@@ -367,6 +367,10 @@
         root.style.setProperty('--h-input', hin + 'px');
     }
 
+    function normalizeDraftText(text) {
+        return (text || '').replace(/\s+/g, ' ').trim();
+    }
+
     function setupDraftCleaner() {
         const sendBtn = document.querySelector('button[aria-label="Send reply"]');
         const textarea = document.querySelector('textarea.wt-textarea');
@@ -377,12 +381,16 @@
             const m = location.href.match(/\/messages\/(\d+)/);
             if (m) {
                 const id = m[1];
+                const sentText = normalizeDraftText(textarea.value);
                 // Видаляємо draft НЕГАЙНО
                 localStorage.removeItem('draft_' + id);
                 // Зберігаємо timestamp відправки
                 const now = Date.now();
                 localStorage.setItem('sent_' + id, now.toString());
-                localStorage.setItem('draft_suppress_until_' + id, (now + DRAFT_SUPPRESS_MS).toString());
+                if (sentText) {
+                    localStorage.setItem('sent_text_' + id, sentText);
+                    localStorage.setItem('sent_text_guard_until_' + id, (now + SENT_TEXT_GUARD_MS).toString());
+                }
             }
         };
 
@@ -758,10 +766,12 @@
 
             if (!area.dataset.saved) {
                 const draftKey = 'draft_' + id;
-                const suppressKey = 'draft_suppress_until_' + id;
+                const sentTextKey = 'sent_text_' + id;
+                const sentTextGuardKey = 'sent_text_guard_until_' + id;
                 const savedDraft = localStorage.getItem(draftKey);
                 const lastSentTime = localStorage.getItem('sent_' + id);
-                const suppressUntil = parseInt(localStorage.getItem(suppressKey) || '0', 10);
+                const sentText = localStorage.getItem(sentTextKey) || '';
+                const sentTextGuardUntil = parseInt(localStorage.getItem(sentTextGuardKey) || '0', 10);
 
                 // Відновлюємо draft ТІЛЬКИ якщо:
                 // 1. Draft існує
@@ -769,7 +779,7 @@
                 if (savedDraft) {
                     let shouldRestore = true;
 
-                    if (Date.now() < suppressUntil) {
+                    if (Date.now() < sentTextGuardUntil && sentText && normalizeDraftText(savedDraft) === sentText) {
                         shouldRestore = false;
                     } else if (lastSentTime) {
                         // Перевіряємо: чи поле вже порожнє (Etsy очистив після відправки)
@@ -791,17 +801,21 @@
                 // Зберігаємо draft при кожному введенні
                 area.oninput = (e) => {
                     const text = e.target.value;
-                    const activeSuppressUntil = parseInt(localStorage.getItem(suppressKey) || '0', 10);
-                    if (Date.now() < activeSuppressUntil) {
+                    const normalized = normalizeDraftText(text);
+                    const activeSentText = localStorage.getItem(sentTextKey) || '';
+                    const activeGuardUntil = parseInt(localStorage.getItem(sentTextGuardKey) || '0', 10);
+
+                    if (Date.now() < activeGuardUntil && activeSentText && normalized === activeSentText) {
                         localStorage.removeItem(draftKey);
-                        if (text.trim() === '') localStorage.removeItem(suppressKey);
                         return;
                     }
 
-                    if (text.trim() !== '') {
+                    if (normalized !== '') {
                         localStorage.setItem(draftKey, text);
                     } else {
                         localStorage.removeItem(draftKey);
+                        localStorage.removeItem(sentTextKey);
+                        localStorage.removeItem(sentTextGuardKey);
                     }
                 };
 
