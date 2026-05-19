@@ -343,3 +343,22 @@
 - [x] Не зберігати draft тільки коли textarea дорівнює щойно відправленому тексту.
 - [x] Дозволити новий draft одразу після send, якщо текст відрізняється.
 - [x] Перевірити syntax/build, commit і push.
+
+---
+
+# Фаза 30 — Hide internal retry/page-scope artifacts (2026-05-09)
+
+## План
+- [x] Прибрати user-facing Gemini retry/fallback countdown текст із chat loader.
+- [x] Санітизувати AI output від internal `[PAGE_SCOPE: ...]` tags перед display/save/diagnostics.
+- [x] Посилити prompt output rule: ніколи не виводити internal context tags.
+- [x] Перевірити syntax/build, commit і push.
+
+---
+
+# Фаза 30 — Hide setup/status messages when real chat starts (2026-05-19)
+
+## План
+- [x] Дослідити, як `chat_ui.js` рендерить і зберігає `system` повідомлення.
+- [x] Додати мінімальну очистку технічних setup/status повідомлень при першому реальному `user` повідомленні.
+- [x] Перевірити syntax/build і built manifests.

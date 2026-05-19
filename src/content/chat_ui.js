@@ -958,7 +958,7 @@ function initChat() {
         const result = await safeStorageGet(['current_chat_messages']);
         if (!result) return;
 
-        const messages = result.current_chat_messages || [];
+        const messages = (result.current_chat_messages || []).filter(msg => !isTransientSystemMessage(msg));
 
         if (messages.length > 0) {
             messages.forEach(msg => {
@@ -976,6 +976,48 @@ function initChat() {
             hash = hash & hash; // Convert to 32-bit integer
         }
         return Math.abs(hash).toString(36);
+    }
+
+    function isTransientSystemMessage(msg) {
+        if (!msg || msg.type !== 'system') return false;
+
+        const text = String(msg.text || '').trim();
+        return text === '✅ API Keys Saved'
+            || /^⚠️ Please configure your .+ API Key to use this model\.$/.test(text)
+            || text === '⚠️ Please configure at least one API Key in Settings.'
+            || text === 'No AI diagnostics recorded yet.'
+            || /^Copied \d+ AI diagnostic record\(s\)\.$/.test(text)
+            || text === 'AI diagnostics cleared.';
+    }
+
+    function removeTransientSystemMessagesFromUi() {
+        const messages = ELEMENTS.chatBox?.querySelectorAll('.etsy-ai-msg.system');
+        if (!messages) return;
+
+        messages.forEach(messageEl => {
+            const clone = messageEl.cloneNode(true);
+            clone.querySelectorAll('.etsy-ai-timestamp, button').forEach(el => el.remove());
+            const text = clone.textContent.trim();
+            if (isTransientSystemMessage({ text, type: 'system' })) {
+                messageEl.remove();
+            }
+        });
+    }
+
+    async function clearTransientSystemMessagesBeforeRealChat() {
+        const result = await safeStorageGet(['current_chat_messages']);
+        if (!result) return;
+
+        const messages = result.current_chat_messages || [];
+        const hasRealMessages = messages.some(msg => msg.type === 'user' || msg.type === 'ai');
+        if (hasRealMessages) return;
+
+        const cleanedMessages = messages.filter(msg => !isTransientSystemMessage(msg));
+        if (cleanedMessages.length !== messages.length) {
+            await safeStorageSet({ current_chat_messages: cleanedMessages });
+        }
+
+        removeTransientSystemMessagesFromUi();
     }
 
     // Save message to global chat storage
@@ -1069,6 +1111,7 @@ function initChat() {
         ELEMENTS.generateBtn.style.opacity = '0.5';
 
         // 2. Show User Message
+        await clearTransientSystemMessagesBeforeRealChat();
         renderMessage(userMessageText, "user");
 
         // 3. Save User Msg to global chat
@@ -1188,6 +1231,7 @@ function initChat() {
     }
 
     async function handleMemoryCommand(originalText, cmd) {
+        await clearTransientSystemMessagesBeforeRealChat();
         addMessage(originalText, "user");
         await saveChatToStorage(originalText, "user");
 
@@ -1673,28 +1717,15 @@ function initChat() {
     }
 
     function showRetryCountdown(status) {
-        const baseMessage = status.type === 'fallback'
-            ? `Gemini is slow. Trying fallback model: ${status.nextModelId || 'next model'}.`
-            : `Gemini is slow. Retrying ${status.retryNumber || 1}/${status.maxRetries || 1} for ${status.modelId || 'model'}.`;
+        console.debug('Gemini retry/fallback status', status);
+    }
 
-        const delaySeconds = Math.ceil((status.delayMs || 0) / 1000);
-        if (!delaySeconds) {
-            showAiStatus(baseMessage);
-            return;
-        }
-
-        let remaining = delaySeconds;
-        showAiStatus(`${baseMessage} ${remaining}s...`);
-
-        const intervalId = setInterval(() => {
-            remaining -= 1;
-            if (remaining <= 0) {
-                clearInterval(intervalId);
-                showAiStatus(`${baseMessage} now...`);
-                return;
-            }
-            showAiStatus(`${baseMessage} ${remaining}s...`);
-        }, 1000);
+    function sanitizeAIResponse(text) {
+        if (!text) return '';
+        return String(text)
+            .replace(/^\s*\[PAGE_SCOPE:[^\]]+\]\s*$/gmi, '')
+            .replace(/\n{3,}/g, '\n\n')
+            .trim();
     }
 
     function removeLoadingMessage() {
@@ -1776,7 +1807,7 @@ function initChat() {
             // Callbacks для обробки streaming
             let firstChunk = true;
             const onChunk = (chunkText, fullText) => {
-                finalText = fullText;
+                finalText = sanitizeAIResponse(fullText);
                 if (firstChunk) {
                     // Прибираємо loading (той, що був створений в handleChatInteraction), показуємо реальний div
                     removeLoadingMessage();
@@ -1784,13 +1815,15 @@ function initChat() {
                     aiMsgDiv.style.display = 'block';
                     firstChunk = false;
                 }
-                aiMsgDiv.innerHTML = parseMarkdown(fullText);
+                aiMsgDiv.innerHTML = parseMarkdown(finalText);
                 attachCopyButtonListeners(aiMsgDiv);
                 ELEMENTS.chatBox.scrollTop = ELEMENTS.chatBox.scrollHeight;
             };
 
             const onComplete = async (fullText) => {
-                finalText = fullText;
+                finalText = sanitizeAIResponse(fullText);
+                aiMsgDiv.innerHTML = parseMarkdown(finalText);
+                attachCopyButtonListeners(aiMsgDiv);
                 // Finalize message
                 aiMsgDiv.id = ''; // Remove streaming ID
                 const timestamp = document.createElement('span');
@@ -1798,13 +1831,13 @@ function initChat() {
                 timestamp.innerText = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
                 aiMsgDiv.appendChild(timestamp);
 
-                const overpromiseRisk = await detectOverpromiseRisk(fullText, diagnosticBase.pageScope || '');
+                const overpromiseRisk = await detectOverpromiseRisk(finalText, diagnosticBase.pageScope || '');
                 if (overpromiseRisk) {
                     addMessage(`Warning: this draft may overpromise (${overpromiseRisk.matches.join(', ')}). Review before sending or ask me to make it more cautious.`, 'system');
                 }
 
                 // Save to global chat storage
-                await saveChatToStorage(fullText, "ai");
+                await saveChatToStorage(finalText, "ai");
 
                 // Generate title after first exchange (user message + AI response)
                 // Cache title using first words from AI response (no API call)
