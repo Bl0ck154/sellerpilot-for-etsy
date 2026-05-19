@@ -1724,6 +1724,7 @@ function initChat() {
         if (!text) return '';
         return String(text)
             .replace(/^\s*\[PAGE_SCOPE:[^\]]+\]\s*$/gmi, '')
+            .replace(/\s*\[PAGE_SCOPE:[^\]]+\]\s*$/i, '')
             .replace(/\n{3,}/g, '\n\n')
             .trim();
     }

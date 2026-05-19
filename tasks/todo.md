@@ -362,3 +362,15 @@
 - [x] Дослідити, як `chat_ui.js` рендерить і зберігає `system` повідомлення.
 - [x] Додати мінімальну очистку технічних setup/status повідомлень при першому реальному `user` повідомленні.
 - [x] Перевірити syntax/build і built manifests.
+
+---
+
+# Фаза 31 — Fix streaming replacement and send button layout (2026-05-19)
+
+## План
+- [x] Знайти, чому partial Gemini stream може замінюватися іншим fallback/retry текстом.
+- [x] Зробити fallback/retry неможливим після першого UI chunk.
+- [x] Розширити sanitizer для inline/trailing internal tags, включно з тегами перед timestamp.
+- [x] Знайти CSS причину зміщення Etsy send button вліво і зафіксувати справа.
+- [x] Оновити lessons після correction.
+- [x] Перевірити syntax/build, diff, commit і push.

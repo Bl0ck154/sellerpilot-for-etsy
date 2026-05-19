@@ -59,3 +59,23 @@
 **Фікс.** Відновити повний chain: `gemini-flash-latest` → `gemini-3.1-flash-lite-preview` → `gemini-3-flash-preview` → `gemini-2.5-flash`.
 
 **Lesson.** Ніколи не видаляти, не даунгрейдити й не приховувати актуальні Gemini-моделі 2026 у цьому проєкті без прямої явної команди користувача. Для latency-фіксів використовувати таймаути, помилки, telemetry або smarter fallback, але не прибирати моделі.
+
+---
+
+## 2026-05-19 — Retry loop після chunk не має падати у fallback
+
+**Мистейк.** У `gemini_service.js` fallback був заборонений після першого stream chunk на основному catch path, але в overloaded retry branch `break` виходив тільки з inner retry loop. Після цього код доходив до next-model fallback і UI міг замінити вже показану partial відповідь іншим текстом.
+
+**Фікс.** Після retry loop додати явний `if (chunkDelivered) break;` перед next-model fallback. Якщо користувач уже побачив chunk, silent retry/fallback більше не можна робити.
+
+**Lesson.** Правило “fallback тільки до першого UI chunk” має перевірятися на кожному nested retry/fallback exit path, не лише на головному catch path.
+
+---
+
+## 2026-05-19 — Hidden flex item змістив кнопки вводу
+
+**Мистейк.** `.etsy-ai-input-controls` мав `justify-content: space-between`, коли model select був прихований через `display:none`. Залишився один visible flex item `.etsy-ai-action-buttons`, тому браузер поставив його зліва.
+
+**Фікс.** Для controls використовувати `justify-content: flex-end`, а для `.etsy-ai-action-buttons` додати `margin-left:auto`.
+
+**Lesson.** Коли flex layout залежить від hidden controls, не покладатися на `space-between`; явний `margin-left:auto` для action group стабільніший.

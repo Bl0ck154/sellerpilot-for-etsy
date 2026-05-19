@@ -605,7 +605,7 @@
 
 .etsy-ai-input-controls {
     display: flex;
-    justify-content: space-between;
+    justify-content: flex-end;
     align-items: center;
     gap: 4px;
     padding: 6px 10px;
@@ -636,6 +636,7 @@
 .etsy-ai-action-buttons {
     display: flex;
     gap: 4px;
+    margin-left: auto;
 }
 
 .etsy-ai-generate-btn,
@@ -821,7 +822,7 @@
 
 .etsy-ai-input-controls {
     display: flex;
-    justify-content: space-between;
+    justify-content: flex-end;
     align-items: center;
     gap: 4px;
     padding: 6px 10px;
@@ -852,6 +853,7 @@
 .etsy-ai-action-buttons {
     display: flex;
     gap: 4px;
+    margin-left: auto;
 }
 
 .etsy-ai-generate-btn,

@@ -385,6 +385,8 @@ AI: ${aiResponse}`;
                     }
                 }
 
+                if (chunkDelivered) break;
+
                 // Try the next model if any remain
                 if (i < models.length - 1) {
                     if (onStatus) {
