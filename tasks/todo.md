@@ -374,3 +374,11 @@
 - [x] Знайти CSS причину зміщення Etsy send button вліво і зафіксувати справа.
 - [x] Оновити lessons після correction.
 - [x] Перевірити syntax/build, diff, commit і push.
+
+---
+
+# Фаза 32 — Improve user timestamp contrast (2026-05-19)
+
+## План
+- [x] Зробити timestamp у user bubble контрастним на помаранчевому фоні.
+- [x] Перевірити CSS diff/build, commit і push.

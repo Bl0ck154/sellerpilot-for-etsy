@@ -505,6 +505,10 @@
     font-weight: 400;
 }
 
+.etsy-ai-msg.user .etsy-ai-timestamp {
+    color: rgba(255, 255, 255, 0.82);
+}
+
 .etsy-ai-loading-dots {
     display: inline-flex !important;
     gap: 3px;
