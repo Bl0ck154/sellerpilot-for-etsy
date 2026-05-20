@@ -382,3 +382,13 @@
 ## План
 - [x] Зробити timestamp у user bubble контрастним на помаранчевому фоні.
 - [x] Перевірити CSS diff/build, commit і push.
+
+---
+
+# Фаза 33 — Release 1.6.6 to Edge (2026-05-19)
+
+## План
+- [x] Підняти source manifest/build version до `1.6.6`.
+- [x] Перебілдити Chrome/Firefox artifacts з версією `1.6.6`.
+- [ ] Закомітити і запушити version bump.
+- [ ] Запустити Edge Add-ons release workflow і перевірити результат.
