@@ -1386,6 +1386,12 @@ function initChat() {
         // 9. Line breaks (звичайні)
         html = html.replace(/\n/g, '<br>');
 
+        // Lists should not inherit line-break spacing between items.
+        html = html
+            .replace(/<\/(li)>\s*<br\s*\/?>\s*<(li)>/gi, '</$1><$2>')
+            .replace(/<(ul|ol)>\s*<br\s*\/?>/gi, '<$1>')
+            .replace(/<br\s*\/?>\s*<\/(ul|ol)>/gi, '</$1>');
+
         // 10. Відновлюємо code blocks
         html = html.replace(/🔸CODEBLOCK◆(\d+)◆/g, (match, index) => {
             return codeBlocks[parseInt(index)];

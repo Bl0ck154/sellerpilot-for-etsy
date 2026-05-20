@@ -473,6 +473,10 @@
     padding-left: 20px;
 }
 
+.etsy-ai-msg.ai li {
+    margin: 3px 0;
+}
+
 .etsy-ai-msg.ai table {
     border-collapse: collapse;
     width: 100%;

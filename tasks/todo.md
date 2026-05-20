@@ -392,3 +392,12 @@
 - [x] Перебілдити Chrome/Firefox artifacts з версією `1.6.6`.
 - [x] Закомітити і запушити version bump.
 - [x] Запустити Edge Add-ons release workflow і перевірити результат.
+
+---
+
+# Фаза 34 — Fix chat list formatting (2026-05-20)
+
+## План
+- [x] Прибрати зайві `<br>` між `<li>` у markdown-rendered списках.
+- [x] Нормалізувати spacing списків у AI bubble CSS.
+- [x] Перевірити syntax/build, commit і push.
