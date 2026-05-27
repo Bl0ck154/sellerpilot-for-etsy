@@ -74,7 +74,7 @@ Models are configured in `content/config.js`. To add or change models:
 3. Set `defaultModel` to your preferred model ID
 4. Reload the extension
 
-**Current default model**: `gemini-3-flash-preview`
+**Current default model**: `gemini-flash-latest`
 
 ## 🎯 Usage
 

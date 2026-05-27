@@ -412,3 +412,14 @@
 - [x] Посилити agent rules для customer language, greeting compliance і Etsy reply drafts.
 - [x] Перевірити primary Gemini model = `gemini-flash-latest`.
 - [x] Перевірити syntax/build, commit і push.
+
+---
+
+# Фаза 36 — Release 1.6.7 Gemini model chain (2026-05-20)
+
+## План
+- [x] Змінити fallback chain на `gemini-flash-latest`, `gemini-flash-lite-latest`, `gemini-3.1-flash-lite`, `gemini-2.5-flash`.
+- [x] Прибрати runtime preview model ids з fallback config.
+- [x] Підняти версію до `1.6.7`.
+- [x] Перевірити syntax/build і manifest artifacts.
+- [ ] Закомітити, запушити і запустити Edge release workflow.

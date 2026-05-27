@@ -530,7 +530,7 @@ function initChat() {
         if (!window.ETSY_AI_CONFIG?.providers) {
             // Fallback if config.js not loaded
             CONFIG.models = [
-                { id: "gemini-3-flash-preview", name: "Gemini 3.0 Flash", provider: "gemini" }
+                { id: "gemini-flash-latest", name: "gemini-flash-latest", provider: "gemini" }
             ];
             ELEMENTS.modelSelect.innerHTML = '';
             const opt = document.createElement('option');
