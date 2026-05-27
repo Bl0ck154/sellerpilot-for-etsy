@@ -422,4 +422,4 @@
 - [x] Прибрати runtime preview model ids з fallback config.
 - [x] Підняти версію до `1.6.7`.
 - [x] Перевірити syntax/build і manifest artifacts.
-- [ ] Закомітити, запушити і запустити Edge release workflow.
+- [x] Закомітити, запушити і запустити Edge release workflow.
