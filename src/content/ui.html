@@ -43,7 +43,11 @@
             <label for="model-select" class="sr-only">AI model</label>
             <select id="model-select" class="etsy-ai-model-select" aria-label="AI model" style="display:none" aria-hidden="true" tabindex="-1"></select>
             <div class="etsy-ai-action-buttons">
-                <button id="generate-btn" class="etsy-ai-generate-btn" aria-label="Generate draft reply" data-ai-tooltip="Suggest Response">✨</button>
+                <button id="generate-btn" class="etsy-ai-generate-btn" aria-label="Suggest customer reply" data-ai-tooltip="Suggest Reply">Reply</button>
+                <div class="etsy-ai-actions-menu-wrap">
+                    <button id="quick-actions-btn" class="etsy-ai-actions-btn" type="button" aria-label="Open quick actions" aria-haspopup="menu" aria-expanded="false" data-ai-tooltip="Actions">⚡</button>
+                    <div id="quick-actions-menu" class="etsy-ai-actions-menu" role="menu" aria-label="Quick actions"></div>
+                </div>
                 <button id="send-btn" class="etsy-ai-send-btn" aria-label="Send message" data-ai-tooltip="Send Message">➤</button>
             </div>
         </div>

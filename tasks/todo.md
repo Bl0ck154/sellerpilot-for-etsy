@@ -401,3 +401,14 @@
 - [x] Прибрати зайві `<br>` між `<li>` у markdown-rendered списках.
 - [x] Нормалізувати spacing списків у AI bubble CSS.
 - [x] Перевірити syntax/build, commit і push.
+
+---
+
+# Фаза 35 — Smart chat actions and Etsy reply behavior (2026-05-20)
+
+## План
+- [x] Замінити magic shortcut на `Actions` dropdown з seller workflows.
+- [x] Додати action prompts: suggest reply, rewrite shorter/warmer/firmer, translate, summarize, risk check.
+- [x] Посилити agent rules для customer language, greeting compliance і Etsy reply drafts.
+- [x] Перевірити primary Gemini model = `gemini-flash-latest`.
+- [x] Перевірити syntax/build, commit і push.

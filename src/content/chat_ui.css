@@ -648,6 +648,7 @@
 }
 
 .etsy-ai-generate-btn,
+.etsy-ai-actions-btn,
 .etsy-ai-send-btn {
     background: transparent;
     border: none;
@@ -662,6 +663,7 @@
 }
 
 .etsy-ai-generate-btn:hover,
+.etsy-ai-actions-btn:hover,
 .etsy-ai-send-btn:hover {
     background-color: var(--hover-bg);
 }
@@ -865,6 +867,7 @@
 }
 
 .etsy-ai-generate-btn,
+.etsy-ai-actions-btn,
 .etsy-ai-send-btn {
     background: transparent;
     border: none;
@@ -879,6 +882,7 @@
 }
 
 .etsy-ai-generate-btn:hover,
+.etsy-ai-actions-btn:hover,
 .etsy-ai-send-btn:hover {
     background-color: var(--hover-bg);
 }
@@ -1077,4 +1081,52 @@
         animation-iteration-count: 1 !important;
         transition-duration: 0.01ms !important;
     }
+}
+
+.etsy-ai-generate-btn {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--primary-color);
+}
+
+.etsy-ai-actions-menu-wrap {
+    position: relative;
+    display: flex;
+}
+
+.etsy-ai-actions-menu {
+    position: absolute;
+    right: 0;
+    bottom: calc(100% + 8px);
+    min-width: 180px;
+    padding: 6px;
+    background: #FFFFFF;
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    box-shadow: 0 12px 30px rgba(15, 23, 42, 0.16);
+    display: none;
+    z-index: 20;
+}
+
+.etsy-ai-actions-menu.visible {
+    display: block;
+}
+
+.etsy-ai-actions-menu-item {
+    width: 100%;
+    border: none;
+    background: transparent;
+    color: var(--text-color);
+    text-align: left;
+    padding: 8px 10px;
+    border-radius: 8px;
+    font-size: 12px;
+    font-family: inherit;
+    cursor: pointer;
+}
+
+.etsy-ai-actions-menu-item:hover,
+.etsy-ai-actions-menu-item:focus-visible {
+    background: var(--hover-bg);
+    outline: none;
 }

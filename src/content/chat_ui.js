@@ -406,7 +406,51 @@ function initChat() {
     let currentChatTitle = null; // AI-generated title (will be set after first exchange)
     let loadedSessionId = null; // ID of loaded session from history (to update instead of duplicate)
     let lastUserMessage = null; // Stores last user message context for retry functionality
-    const DEFAULT_SUGGEST_RESPONSE_PROMPT = "Draft a cautious customer reply based on the Etsy conversation and page context. Do not accept custom work, promise feasibility, promise timing, or promise an exact result unless I explicitly approved it. If the customer asks for custom work, ask for needed details/references and say we will review before confirming. If the request sounds risky or unrealistic, politely decline or explain that we need to check first.";
+    const DEFAULT_SUGGEST_RESPONSE_PROMPT = "Draft a cautious customer reply based on the current Etsy conversation and page context. Write the draft in the customer's conversation language, not necessarily the Owner's language. If the Owner asks to include a greeting, include it; otherwise use a greeting only for a new conversation. Do not accept custom work, promise feasibility, promise timing, or promise an exact result unless I explicitly approved it. If the customer asks for custom work, ask for needed details/references and say we will review before confirming. If the request sounds risky or unrealistic, politely decline or explain that we need to check first.";
+    const QUICK_ACTIONS = [
+        {
+            id: 'suggest-reply',
+            label: 'Suggest reply',
+            prompt: DEFAULT_SUGGEST_RESPONSE_PROMPT,
+            systemAction: true
+        },
+        {
+            id: 'rewrite-shorter',
+            label: 'Rewrite shorter',
+            prompt: 'Rewrite my current draft or latest customer reply draft to be shorter and clearer. Preserve the customer-facing language and do not add promises or new facts. Return only the rewritten draft in triple backticks.',
+            systemAction: false
+        },
+        {
+            id: 'rewrite-warmer',
+            label: 'Rewrite warmer',
+            prompt: 'Rewrite my current draft or latest customer reply draft to sound warmer and more human while staying concise. Preserve the customer-facing language and do not add promises or new facts. Return only the rewritten draft in triple backticks.',
+            systemAction: false
+        },
+        {
+            id: 'rewrite-firmer',
+            label: 'Rewrite firmer',
+            prompt: 'Rewrite my current draft or latest customer reply draft to be firmer, calm, and professional. Preserve the customer-facing language. Do not apologize excessively, admit fault, promise refunds, or add new facts. Return only the rewritten draft in triple backticks.',
+            systemAction: false
+        },
+        {
+            id: 'translate-english',
+            label: 'Translate to English',
+            prompt: 'Translate my current draft or latest customer reply draft into natural customer-facing English. Preserve meaning, tone, names, order details, and all constraints. Return only the translated draft in triple backticks.',
+            systemAction: false
+        },
+        {
+            id: 'summarize-thread',
+            label: 'Summarize thread',
+            prompt: 'Summarize the current Etsy conversation for the Owner. Include: customer wants, what has already been said or promised, open questions, recommended next action. Do not draft a customer reply unless needed.',
+            systemAction: true
+        },
+        {
+            id: 'risk-check',
+            label: 'Check risks',
+            prompt: 'Review the current Etsy conversation and my latest draft for seller risks. Flag refund/custom-work/overpromise/timing/policy risks. Then give a safer response strategy and, if useful, one cautious customer reply draft in the customer language.',
+            systemAction: true
+        }
+    ];
 
     const ELEMENTS = {
         statusDot: document.getElementById('connection-status'),
@@ -416,6 +460,8 @@ function initChat() {
         userInput: document.getElementById('user-input'),
         sendBtn: document.getElementById('send-btn'),
         generateBtn: document.getElementById('generate-btn'),
+        quickActionsBtn: document.getElementById('quick-actions-btn'),
+        quickActionsMenu: document.getElementById('quick-actions-menu'),
         modelSelect: document.getElementById('model-select'),
         // Settings
         settingsBtn: document.getElementById('settings-btn'),
@@ -647,12 +693,21 @@ function initChat() {
 
         ELEMENTS.sendBtn.addEventListener('click', sendMessage);
 
-        // "Generate Draft" shortcut
+        setupQuickActionsMenu();
+
+        // "Suggest Reply" shortcut
         ELEMENTS.generateBtn.addEventListener('click', async () => {
             const prompt = window.AgentPolicyManager
                 ? await window.AgentPolicyManager.getSuggestResponsePrompt(DEFAULT_SUGGEST_RESPONSE_PROMPT)
                 : DEFAULT_SUGGEST_RESPONSE_PROMPT;
             handleChatInteraction(prompt, true);
+        });
+
+        ELEMENTS.quickActionsBtn?.addEventListener('click', toggleQuickActionsMenu);
+        document.addEventListener('mousedown', (e) => {
+            if (!ELEMENTS.quickActionsMenu?.classList.contains('visible')) return;
+            if (e.target.closest('.etsy-ai-actions-menu-wrap')) return;
+            closeQuickActionsMenu();
         });
 
         // Settings
@@ -775,6 +830,40 @@ function initChat() {
         // Show message about missing API key
         const providerName = providerId.charAt(0).toUpperCase() + providerId.slice(1);
         addMessage(`⚠️ Please configure your ${providerName} API Key to use this model.`, "system");
+    }
+
+    function setupQuickActionsMenu() {
+        if (!ELEMENTS.quickActionsMenu) return;
+
+        ELEMENTS.quickActionsMenu.innerHTML = QUICK_ACTIONS.map(action => (
+            `<button type="button" role="menuitem" class="etsy-ai-actions-menu-item" data-action-id="${escapeHtml(action.id)}">${escapeHtml(action.label)}</button>`
+        )).join('');
+
+        ELEMENTS.quickActionsMenu.addEventListener('click', async (e) => {
+            const item = e.target.closest('[data-action-id]');
+            if (!item) return;
+
+            const action = QUICK_ACTIONS.find(entry => entry.id === item.dataset.actionId);
+            if (!action || isProcessing) return;
+
+            closeQuickActionsMenu();
+            const prompt = action.id === 'suggest-reply' && window.AgentPolicyManager
+                ? await window.AgentPolicyManager.getSuggestResponsePrompt(action.prompt)
+                : action.prompt;
+            handleChatInteraction(prompt, action.systemAction);
+        });
+    }
+
+    function toggleQuickActionsMenu() {
+        if (!ELEMENTS.quickActionsMenu || !ELEMENTS.quickActionsBtn || isProcessing) return;
+        const shouldOpen = !ELEMENTS.quickActionsMenu.classList.contains('visible');
+        ELEMENTS.quickActionsMenu.classList.toggle('visible', shouldOpen);
+        ELEMENTS.quickActionsBtn.setAttribute('aria-expanded', shouldOpen ? 'true' : 'false');
+    }
+
+    function closeQuickActionsMenu() {
+        ELEMENTS.quickActionsMenu?.classList.remove('visible');
+        ELEMENTS.quickActionsBtn?.setAttribute('aria-expanded', 'false');
     }
 
     function updateCustomInstructionsWarning(customInstructions) {
@@ -1079,9 +1168,7 @@ function initChat() {
                     ELEMENTS.sendBtn.style.opacity = '1';
                     ELEMENTS.sendBtn.style.cursor = 'pointer';
                     ELEMENTS.sendBtn.style.pointerEvents = 'auto';
-                    ELEMENTS.generateBtn.disabled = false;
-                    ELEMENTS.generateBtn.style.opacity = '1';
-                    ELEMENTS.generateBtn.style.pointerEvents = 'auto';
+                    setActionButtonsDisabled(false);
                     openSettingsForProvider(provider);
                     return;
                 }
@@ -1091,9 +1178,7 @@ function initChat() {
                 ELEMENTS.sendBtn.style.opacity = '1';
                 ELEMENTS.sendBtn.style.cursor = 'pointer';
                 ELEMENTS.sendBtn.style.pointerEvents = 'auto';
-                ELEMENTS.generateBtn.disabled = false;
-                ELEMENTS.generateBtn.style.opacity = '1';
-                ELEMENTS.generateBtn.style.pointerEvents = 'auto';
+                setActionButtonsDisabled(false);
                 addMessage("⚠️ Extension error. Please refresh the page.", "system");
                 return;
             }
@@ -1107,8 +1192,7 @@ function initChat() {
         ELEMENTS.sendBtn.disabled = true;
         ELEMENTS.sendBtn.style.opacity = '0.5';
         ELEMENTS.sendBtn.style.cursor = 'not-allowed';
-        ELEMENTS.generateBtn.disabled = true;
-        ELEMENTS.generateBtn.style.opacity = '0.5';
+        setActionButtonsDisabled(true);
 
         // 2. Show User Message
         await clearTransientSystemMessagesBeforeRealChat();
@@ -1190,10 +1274,18 @@ function initChat() {
             ELEMENTS.sendBtn.style.opacity = '1';
             ELEMENTS.sendBtn.style.cursor = 'pointer';
             ELEMENTS.sendBtn.style.pointerEvents = 'auto';
-            ELEMENTS.generateBtn.disabled = false;
-            ELEMENTS.generateBtn.style.opacity = '1';
-            ELEMENTS.generateBtn.style.pointerEvents = 'auto';
+            setActionButtonsDisabled(false);
         }
+    }
+
+    function setActionButtonsDisabled(disabled) {
+        [ELEMENTS.generateBtn, ELEMENTS.quickActionsBtn].forEach(btn => {
+            if (!btn) return;
+            btn.disabled = disabled;
+            btn.style.opacity = disabled ? '0.5' : '1';
+            btn.style.pointerEvents = disabled ? 'none' : 'auto';
+        });
+        if (disabled) closeQuickActionsMenu();
     }
 
     function sendMessage() {
@@ -1223,9 +1315,7 @@ function initChat() {
         ELEMENTS.sendBtn.style.opacity = '0.5';
         ELEMENTS.sendBtn.style.cursor = 'not-allowed';
         ELEMENTS.sendBtn.style.pointerEvents = 'none';
-        ELEMENTS.generateBtn.disabled = true;
-        ELEMENTS.generateBtn.style.opacity = '0.5';
-        ELEMENTS.generateBtn.style.pointerEvents = 'none';
+        setActionButtonsDisabled(true);
 
         handleChatInteraction(text);
     }
@@ -1657,8 +1747,7 @@ function initChat() {
         ELEMENTS.sendBtn.disabled = true;
         ELEMENTS.sendBtn.style.opacity = '0.5';
         ELEMENTS.sendBtn.style.cursor = 'not-allowed';
-        ELEMENTS.generateBtn.disabled = true;
-        ELEMENTS.generateBtn.style.opacity = '0.5';
+        setActionButtonsDisabled(true);
 
         // Don't re-show user message - it's already in the chat from original attempt
         // Just show loading and retry the API call
@@ -1695,8 +1784,7 @@ function initChat() {
             ELEMENTS.sendBtn.disabled = false;
             ELEMENTS.sendBtn.style.opacity = '1';
             ELEMENTS.sendBtn.style.cursor = 'pointer';
-            ELEMENTS.generateBtn.disabled = false;
-            ELEMENTS.generateBtn.style.opacity = '1';
+            setActionButtonsDisabled(false);
         }
     }
 
