@@ -442,3 +442,14 @@
 - [x] Перевірити, чи є project-level agent instructions для Edge releases.
 - [x] Додати `AGENTS.md` з Edge release runbook для майбутніх агентів.
 - [x] Перевірити diff, commit і push.
+
+---
+
+# Фаза 39 — Release 1.6.8 draft cleanup fix to Edge (2026-06-01)
+
+## План
+- [x] Підняти source manifest/build version до `1.6.8`.
+- [x] Перебілдити Chrome/Firefox artifacts з версією `1.6.8`.
+- [ ] Закомітити і запушити draft cleanup fix + version bump.
+- [ ] Запустити Edge Add-ons release workflow з publish=true і перевірити результат.
+- [ ] Оновити release tracking після успішного workflow, закомітити і запушити.

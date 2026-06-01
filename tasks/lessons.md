@@ -79,3 +79,13 @@
 **Фікс.** Для controls використовувати `justify-content: flex-end`, а для `.etsy-ai-action-buttons` додати `margin-left:auto`.
 
 **Lesson.** Коли flex layout залежить від hidden controls, не покладатися на `space-between`; явний `margin-left:auto` для action group стабільніший.
+
+---
+
+## 2026-06-01 — Sent Etsy replies resurrected as drafts
+
+**Мистейк.** Draft restore у `src/content/chat_manager.js` покладався на одноразовий `area.oninput` + глобальний `draftCleanerAttached` і не мав timestamp для draft. Після click/Enter код видаляв `draft_<id>`, але Etsy/React міг ще раз кинути `input` зі старим value і записати вже відправлений текст назад. Після SPA/DOM replacement listener також міг бути прив'язаний не до актуального textarea/button.
+
+**Фікс.** Draft logic має бути per-textarea/per-button через `dataset`, з `draft_updated_at_<id>`, `sent_<id>`, `sent_text_<id>` і коротким guard-window. Після send exact sent text не можна зберігати як draft, legacy draft без timestamp після `sent_<id>` треба відкидати як ambiguous.
+
+**Lesson.** Для draft-autosave після submit потрібна state-machine, а не "remove on click". Будь-який post-submit `input` race має перевіряти last-sent text + timestamps, інакше UI framework може воскресити вже відправлений текст.

@@ -16,7 +16,6 @@
     let observer = null;
     let urlCheckInterval = null;
     let lastUrl = location.href;
-    let draftCleanerAttached = false;
     let lastParsedHash = "";
 
     // Attachments viewer state
@@ -27,6 +26,7 @@
     let storageChangeListener = null;
     let popstateListener = null;
     let hashchangeListener = null;
+    const pendingSendTextByConversation = new Map();
 
     // Module API
     window.EtsyChatManager = {
@@ -100,7 +100,6 @@
             }
 
             // Reset state
-            draftCleanerAttached = false;
             lastParsedHash = "";
             lastAttachmentsConvoId = null;
             lastAttachmentsHash = null;
@@ -371,57 +370,217 @@
         return (text || '').replace(/\s+/g, ' ').trim();
     }
 
-    function setupDraftCleaner() {
-        const sendBtn = document.querySelector('button[aria-label="Send reply"]');
-        const textarea = document.querySelector('textarea.wt-textarea');
+    function getConversationId() {
+        const m = location.href.match(/\/messages\/(\d+)/);
+        return m ? m[1] : null;
+    }
 
-        if (!sendBtn || !textarea || draftCleanerAttached) return;
+    function getDraftStorageKeys(id) {
+        return {
+            draftKey: 'draft_' + id,
+            draftUpdatedAtKey: 'draft_updated_at_' + id,
+            sentKey: 'sent_' + id,
+            sentTextKey: 'sent_text_' + id,
+            sentTextGuardKey: 'sent_text_guard_until_' + id
+        };
+    }
 
-        const clearDraftAndMarkSent = () => {
-            const m = location.href.match(/\/messages\/(\d+)/);
-            if (m) {
-                const id = m[1];
-                const sentText = normalizeDraftText(textarea.value);
-                // Видаляємо draft НЕГАЙНО
-                localStorage.removeItem('draft_' + id);
-                // Зберігаємо timestamp відправки
-                const now = Date.now();
-                localStorage.setItem('sent_' + id, now.toString());
-                if (sentText) {
-                    localStorage.setItem('sent_text_' + id, sentText);
-                    localStorage.setItem('sent_text_guard_until_' + id, (now + SENT_TEXT_GUARD_MS).toString());
+    function readStorageTimestamp(key) {
+        const value = parseInt(localStorage.getItem(key) || '0', 10);
+        return Number.isFinite(value) ? value : 0;
+    }
+
+    function removeStoredDraft(id) {
+        const { draftKey, draftUpdatedAtKey } = getDraftStorageKeys(id);
+        localStorage.removeItem(draftKey);
+        localStorage.removeItem(draftUpdatedAtKey);
+    }
+
+    function clearSentTextGuard(id) {
+        const { sentTextKey, sentTextGuardKey } = getDraftStorageKeys(id);
+        localStorage.removeItem(sentTextKey);
+        localStorage.removeItem(sentTextGuardKey);
+    }
+
+    function isGuardedSentText(id, normalizedText) {
+        if (!normalizedText) return false;
+
+        const { sentTextKey, sentTextGuardKey } = getDraftStorageKeys(id);
+        const guardUntil = readStorageTimestamp(sentTextGuardKey);
+        if (!guardUntil) return false;
+
+        if (Date.now() >= guardUntil) {
+            clearSentTextGuard(id);
+            return false;
+        }
+
+        return normalizedText === (localStorage.getItem(sentTextKey) || '');
+    }
+
+    function markDraftSent(id, text) {
+        if (!id) return;
+
+        const normalized = normalizeDraftText(text);
+        const { sentKey, sentTextKey, sentTextGuardKey } = getDraftStorageKeys(id);
+        const now = Date.now();
+
+        removeStoredDraft(id);
+        localStorage.setItem(sentKey, now.toString());
+
+        if (normalized) {
+            localStorage.setItem(sentTextKey, normalized);
+            localStorage.setItem(sentTextGuardKey, (now + SENT_TEXT_GUARD_MS).toString());
+        } else {
+            clearSentTextGuard(id);
+        }
+
+        pendingSendTextByConversation.delete(id);
+    }
+
+    function getActiveTextarea() {
+        return document.querySelector('textarea.wt-textarea');
+    }
+
+    function getTextareaConversationId(textarea) {
+        const currentId = getConversationId();
+        if (currentId && textarea === getActiveTextarea()) return currentId;
+        return textarea.dataset.draftConvoId || currentId;
+    }
+
+    function rememberPendingSendText(textarea) {
+        const id = getTextareaConversationId(textarea);
+        if (!id || !textarea) return;
+
+        const text = textarea.value;
+        if (normalizeDraftText(text)) {
+            pendingSendTextByConversation.set(id, {
+                text,
+                capturedAt: Date.now()
+            });
+        } else {
+            pendingSendTextByConversation.delete(id);
+        }
+    }
+
+    function clearDraftAndMarkSent(textarea) {
+        const id = getTextareaConversationId(textarea);
+        if (!id || !textarea) return;
+
+        const pending = pendingSendTextByConversation.get(id);
+        const pendingText = pending && Date.now() - pending.capturedAt < 10000 ? pending.text : '';
+        const text = textarea.value || pendingText;
+        if (normalizeDraftText(text)) {
+            markDraftSent(id, text);
+        } else {
+            removeStoredDraft(id);
+        }
+    }
+
+    function handleDraftInput(e) {
+        const id = getTextareaConversationId(e.target);
+        if (!id) return;
+
+        e.target.dataset.draftConvoId = id;
+
+        const text = e.target.value;
+        const normalized = normalizeDraftText(text);
+        if (!normalized) {
+            removeStoredDraft(id);
+            return;
+        }
+
+        if (isGuardedSentText(id, normalized)) {
+            removeStoredDraft(id);
+            return;
+        }
+
+        const { draftKey, draftUpdatedAtKey } = getDraftStorageKeys(id);
+        clearSentTextGuard(id);
+        localStorage.setItem(draftKey, text);
+        localStorage.setItem(draftUpdatedAtKey, Date.now().toString());
+    }
+
+    function restoreStoredDraft(area, id) {
+        const { draftKey, draftUpdatedAtKey, sentKey, sentTextKey } = getDraftStorageKeys(id);
+        const savedDraft = localStorage.getItem(draftKey);
+        if (!savedDraft) return;
+
+        const normalizedDraft = normalizeDraftText(savedDraft);
+        const draftUpdatedAt = readStorageTimestamp(draftUpdatedAtKey);
+        const lastSentAt = readStorageTimestamp(sentKey);
+        const lastSentText = localStorage.getItem(sentTextKey) || '';
+        let shouldRestore = Boolean(normalizedDraft);
+
+        if (shouldRestore && isGuardedSentText(id, normalizedDraft)) {
+            shouldRestore = false;
+        }
+
+        if (shouldRestore && lastSentText && normalizedDraft === lastSentText && (!draftUpdatedAt || draftUpdatedAt <= lastSentAt)) {
+            shouldRestore = false;
+        }
+
+        // Legacy drafts have no timestamp; after a send they are ambiguous, so do not resurrect them.
+        if (shouldRestore && lastSentAt && !draftUpdatedAt) {
+            shouldRestore = false;
+        }
+
+        if (shouldRestore && draftUpdatedAt && lastSentAt && draftUpdatedAt <= lastSentAt) {
+            shouldRestore = false;
+        }
+
+        if (shouldRestore) {
+            area.value = savedDraft;
+            area.dispatchEvent(new Event('input', { bubbles: true }));
+        } else {
+            removeStoredDraft(id);
+        }
+    }
+
+    function setupDraftPersistence(area, id) {
+        area.dataset.draftConvoId = id;
+
+        if (!area.dataset.draftSaverAttached) {
+            area.addEventListener('input', handleDraftInput);
+            area.dataset.draftSaverAttached = 'true';
+        }
+
+        if (area.dataset.draftRestoreConvoId !== id) {
+            restoreStoredDraft(area, id);
+            area.dataset.draftRestoreConvoId = id;
+        }
+    }
+
+    function setupDraftCleaner(textarea) {
+        if (!textarea) return;
+
+        const scope = textarea.closest('.detail-view') || textarea.closest('form') || document;
+        const form = textarea.closest('form');
+        const sendButtons = new Set(scope.querySelectorAll('button[aria-label="Send reply"], button[aria-label*="Send"]'));
+        form?.querySelectorAll('button[type="submit"]').forEach(btn => sendButtons.add(btn));
+
+        sendButtons.forEach(sendBtn => {
+            if (sendBtn.id === 'send-btn' || sendBtn.classList.contains('etsy-ai-send-btn')) return;
+            if (!sendBtn.dataset.draftCleanerAttached) {
+                sendBtn.addEventListener('pointerdown', () => rememberPendingSendText(textarea), true);
+                sendBtn.addEventListener('click', () => clearDraftAndMarkSent(textarea), true);
+                sendBtn.dataset.draftCleanerAttached = 'true';
+            }
+        });
+
+        if (!textarea.dataset.draftKeydownCleanerAttached) {
+            textarea.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+                    clearDraftAndMarkSent(textarea);
                 }
-            }
-        };
+            }, true);
+            textarea.dataset.draftKeydownCleanerAttached = 'true';
+        }
 
-        const clearEmptyDraft = () => {
-            const m = location.href.match(/\/messages\/(\d+)/);
-            if (m) {
-                const id = m[1];
-                localStorage.removeItem('draft_' + id);
-            }
-        };
+        if (form && !form.dataset.draftSubmitCleanerAttached) {
+            form.addEventListener('submit', () => clearDraftAndMarkSent(textarea), true);
+            form.dataset.draftSubmitCleanerAttached = 'true';
+        }
 
-        // НЕГАЙНЕ очищення при кліку на Send
-        sendBtn.addEventListener('click', () => {
-            clearDraftAndMarkSent();
-        });
-
-        // НЕГАЙНЕ очищення при Enter (без Shift)
-        textarea.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-                clearDraftAndMarkSent();
-            }
-        });
-
-        // Очищення при порожньому полі (користувач стер текст)
-        textarea.addEventListener('input', (e) => {
-            if (e.target.value.trim() === '') {
-                clearEmptyDraft();
-            }
-        });
-
-        draftCleanerAttached = true;
     }
 
     function forceCleanupChatMode() {
@@ -436,8 +595,6 @@
 
         document.querySelectorAll('.my-col-right').forEach(el => el.classList.remove('my-col-right'));
         document.querySelectorAll('.my-col-center').forEach(el => el.classList.remove('my-col-center'));
-
-        draftCleanerAttached = false;
 
         // Clean up attachments viewer
         const attachmentsViewer = document.getElementById('etsy-ai-attachments-viewer');
@@ -702,7 +859,6 @@
         const currentUrl = location.href;
         if (currentUrl !== lastUrl) {
             lastUrl = currentUrl;
-            draftCleanerAttached = false;
         }
 
         const isChatUrl = /\/messages\/\d+/.test(window.location.href);
@@ -763,66 +919,8 @@
 
         if (area && m) {
             const id = m[1];
-
-            if (!area.dataset.saved) {
-                const draftKey = 'draft_' + id;
-                const sentTextKey = 'sent_text_' + id;
-                const sentTextGuardKey = 'sent_text_guard_until_' + id;
-                const savedDraft = localStorage.getItem(draftKey);
-                const lastSentTime = localStorage.getItem('sent_' + id);
-                const sentText = localStorage.getItem(sentTextKey) || '';
-                const sentTextGuardUntil = parseInt(localStorage.getItem(sentTextGuardKey) || '0', 10);
-
-                // Відновлюємо draft ТІЛЬКИ якщо:
-                // 1. Draft існує
-                // 2. НЕ було відправки, АБО draft був збережений ПІСЛЯ останньої відправки
-                if (savedDraft) {
-                    let shouldRestore = true;
-
-                    if (Date.now() < sentTextGuardUntil && sentText && normalizeDraftText(savedDraft) === sentText) {
-                        shouldRestore = false;
-                    } else if (lastSentTime) {
-                        // Перевіряємо: чи поле вже порожнє (Etsy очистив після відправки)
-                        // Якщо порожнє - це означає що повідомлення вже відправлене
-                        if (area.value.trim() === '') {
-                            shouldRestore = false;
-                        }
-                    }
-
-                    if (shouldRestore) {
-                        area.value = savedDraft;
-                        area.dispatchEvent(new Event('input', { bubbles: true }));
-                    } else {
-                        // Якщо не відновлюємо - видаляємо старий draft
-                        localStorage.removeItem(draftKey);
-                    }
-                }
-
-                // Зберігаємо draft при кожному введенні
-                area.oninput = (e) => {
-                    const text = e.target.value;
-                    const normalized = normalizeDraftText(text);
-                    const activeSentText = localStorage.getItem(sentTextKey) || '';
-                    const activeGuardUntil = parseInt(localStorage.getItem(sentTextGuardKey) || '0', 10);
-
-                    if (Date.now() < activeGuardUntil && activeSentText && normalized === activeSentText) {
-                        localStorage.removeItem(draftKey);
-                        return;
-                    }
-
-                    if (normalized !== '') {
-                        localStorage.setItem(draftKey, text);
-                    } else {
-                        localStorage.removeItem(draftKey);
-                        localStorage.removeItem(sentTextKey);
-                        localStorage.removeItem(sentTextGuardKey);
-                    }
-                };
-
-                area.dataset.saved = "true";
-            }
-
-            setupDraftCleaner();
+            setupDraftPersistence(area, id);
+            setupDraftCleaner(area);
         }
 
         // Inject attachments viewer (optimized with caching)
