@@ -423,3 +423,22 @@
 - [x] Підняти версію до `1.6.7`.
 - [x] Перевірити syntax/build і manifest artifacts.
 - [x] Закомітити, запушити і запустити Edge release workflow.
+
+---
+
+# Фаза 37 — Fix Etsy sent reply draft resurrection (2026-06-01)
+
+## План
+- [x] Знайти точку, де Etsy reply textarea зберігає draft і чому sent text може записатися назад.
+- [x] Зробити send cleanup надійним для click, Enter і submit, навіть якщо Etsy міняє DOM/label кнопки.
+- [x] Заборонити повторне збереження exact sent text під час post-send React/input race, доки поле не очиститься або юзер не введе інший текст.
+- [x] Перевірити синтаксис, diff і за потреби build artifacts.
+
+---
+
+# Фаза 38 — Agent Edge release instructions (2026-06-01)
+
+## План
+- [x] Перевірити, чи є project-level agent instructions для Edge releases.
+- [x] Додати `AGENTS.md` з Edge release runbook для майбутніх агентів.
+- [x] Перевірити diff, commit і push.
