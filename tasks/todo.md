@@ -450,6 +450,7 @@
 ## План
 - [x] Підняти source manifest/build version до `1.6.8`.
 - [x] Перебілдити Chrome/Firefox artifacts з версією `1.6.8`.
-- [ ] Закомітити і запушити draft cleanup fix + version bump.
-- [ ] Запустити Edge Add-ons release workflow з publish=true і перевірити результат.
-- [ ] Оновити release tracking після успішного workflow, закомітити і запушити.
+- [x] Закомітити і запушити draft cleanup fix + version bump: `c339a5d`.
+- [x] Запустити Edge Add-ons release workflow з publish=true: run `26745792657`.
+- [ ] Edge publish result: package uploaded, publish failed with `InProgressSubmission` (`Can't publish extension as your extension submission is in progress. Please try again later.`). Wait/check Partner Center before retrying.
+- [x] Оновити release tracking після workflow, закомітити і запушити.
