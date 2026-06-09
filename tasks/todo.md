@@ -500,3 +500,24 @@
 - [x] Додати видимий separator у AI UI при переході/поверненні: `Continuing chat with <customer name>`.
 - [x] Виправити greeting behavior: prompt history для generation/retry читається зі scoped key поточного Etsy chat, а не зі старої global AI history.
 - [x] Syntax check і Chrome/Firefox rebuild для `1.6.15`; commit і push виконуються нижче.
+
+---
+
+# Фаза 44 — Fix customer name separator on first messages open (2026-06-09)
+
+## План
+- [x] Перевірити `Messages - Etsy.htm` sample і знайти джерело імені customer.
+- [x] Зберігати `detail.other_user.display_name` у `ETSY_CHAT_HISTORY`.
+- [x] Додати fallback parser inline `Etsy.Context` у `chat_ui.js`, щоб separator не падав до `Messages - Etsy`.
+- [x] Syntax check для `chat_ui.js` і `etsy_context_interceptor.js`; rebuild/commit/push разом з Phase 45.
+
+---
+
+# Фаза 45 — Stop sent Etsy replies restoring after inbox SPA roundtrip (2026-06-09)
+
+## План
+- [x] Відтворити root cause по lifecycle: sent text після `/messages/<id>` → `/messages/` → `/messages/<id>` може лишатися у `draft_<id>`.
+- [x] Зробити exact sent/confirmed seller text persistent denylist для draft restore/save, а не 5-хвилинний guard.
+- [x] Reconcile latest seller-authored message from `ETSY_CHAT_HISTORY` як confirmed sent text навіть якщо send listener не спрацював.
+- [x] Якщо stored/live textarea value збігається з confirmed sent text, видалити draft і очистити поле.
+- [x] Syntax check і Chrome/Firefox rebuild для `1.6.16`; commit і push виконуються нижче.

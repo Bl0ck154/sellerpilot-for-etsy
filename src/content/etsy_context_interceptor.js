@@ -96,6 +96,8 @@ window.EtsyContextInterceptor = (function () {
                 await chrome.storage.local.set({
                     [STORAGE_KEYS.CHAT_HISTORY]: {
                         convo_id: String(convoId),
+                        customer_display_name: String(detail.other_user?.display_name || '').trim(),
+                        customer_user_id: detail.other_user?.user_id ? String(detail.other_user.user_id) : null,
                         messages: normalizedMessages,
                         timestamp: responseTimestamp
                     }

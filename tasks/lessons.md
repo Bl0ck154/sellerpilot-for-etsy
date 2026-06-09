@@ -119,3 +119,13 @@
 **Фікс.** Прибирати source of truth, який воскресає sent draft: після send не auto-restore-ити Etsy textarea draft, доки користувач явно не почне новий текст. Для AI chat context не змішувати різні Etsy conversations у один `current_chat_messages` prompt.
 
 **Lesson.** Якщо баг створений нашою persistence-фічею, не ставити глобальні DOM/prototype hooks як перший фікс. Спочатку спростити lifecycle і прибрати небезпечний restore path.
+
+---
+
+## 2026-06-09 — Customer name для Etsy messages не брати з page title
+
+**Мистейк.** Separator для нового scoped AI chat fallback-ився до `page_content.title`, тому на реальній messages сторінці показував `Continuing chat with Messages - Etsy` замість імені покупця.
+
+**Фікс.** Ім'я покупця треба брати з Etsy detail payload: `initial_data.detail.other_user.display_name`, зберігати у `ETSY_CHAT_HISTORY.customer_display_name`, а для першого відкриття мати fallback parser inline `Etsy.Context` зі script tags.
+
+**Lesson.** На Etsy `/messages/<id>` title сторінки не є customer identity. Для UI labels і prompt scope використовувати conversation detail payload (`other_user`) або явно показувати generic `customer`, але не `Messages - Etsy`.

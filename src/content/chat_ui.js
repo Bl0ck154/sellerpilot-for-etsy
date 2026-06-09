@@ -1106,6 +1106,9 @@ function initChat() {
     }
 
     function getCustomerDisplayNameFromHistory(chatHistory) {
+        const storedName = String(chatHistory?.customer_display_name || chatHistory?.other_user?.display_name || '').trim();
+        if (storedName) return storedName;
+
         const messages = chatHistory?.messages || [];
         for (let i = messages.length - 1; i >= 0; i--) {
             const msg = messages[i];
@@ -1117,16 +1120,43 @@ function initChat() {
         return 'customer';
     }
 
+    function getCustomerDisplayNameFromEtsyContext(convoId = null) {
+        try {
+            const scripts = document.querySelectorAll('script[type="text/javascript"], script:not([src])');
+            for (const script of scripts) {
+                const content = script.textContent || '';
+                if (!content.includes('Etsy.Context') || !content.includes('other_user')) continue;
+
+                const match = content.match(/Etsy\.Context\s*=\s*(\{[\s\S]*?\});/);
+                if (!match) continue;
+
+                const context = JSON.parse(match[1]);
+                const detail = context?.data?.initial_data?.detail;
+                if (!detail) continue;
+                if (convoId && detail.conversation_id && String(detail.conversation_id) !== String(convoId)) continue;
+
+                const name = String(detail.other_user?.display_name || '').trim();
+                if (name) return name;
+            }
+        } catch (error) {
+            console.warn('⚠️ Failed to parse Etsy customer name from page context:', error);
+        }
+
+        return '';
+    }
+
     async function getCurrentCustomerDisplayName(convoId = null) {
         try {
             const result = await safeStorageGet(['ETSY_CHAT_HISTORY']);
             const chatHistory = result?.ETSY_CHAT_HISTORY;
             if (convoId && chatHistory?.convo_id && String(chatHistory.convo_id) !== String(convoId)) {
-                return 'customer';
+                return getCustomerDisplayNameFromEtsyContext(convoId) || 'customer';
             }
-            return getCustomerDisplayNameFromHistory(chatHistory);
+            const storageName = getCustomerDisplayNameFromHistory(chatHistory);
+            if (storageName && storageName !== 'customer') return storageName;
+            return getCustomerDisplayNameFromEtsyContext(convoId) || 'customer';
         } catch (_) {
-            return 'customer';
+            return getCustomerDisplayNameFromEtsyContext(convoId) || 'customer';
         }
     }
 
@@ -1135,7 +1165,7 @@ function initChat() {
         const customerName = await getCurrentCustomerDisplayName(convoId);
         if (customerName && customerName !== 'customer') return customerName;
 
-        return context?.page_content?.title || context?.metadata?.title || 'customer';
+        return 'customer';
     }
 
     function removeTransientSystemMessagesFromUi() {

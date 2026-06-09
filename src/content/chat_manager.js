@@ -485,11 +485,6 @@
         const confirmedAt = readStorageTimestamp(confirmedSentAtKey);
         if (!confirmedText || !confirmedAt) return false;
 
-        if (Date.now() - confirmedAt > SENT_TEXT_GUARD_MS) {
-            clearConfirmedSentText(id);
-            return false;
-        }
-
         return normalizedText === confirmedText;
     }
 
@@ -531,13 +526,15 @@
     function isDraftRestoreBlockedAfterSend(id, normalizedDraft, draftUpdatedAt) {
         const { sentKey, sentTextKey, confirmedSentTextKey } = getDraftStorageKeys(id);
         const sentAt = readStorageTimestamp(sentKey);
-        if (!sentAt || Date.now() - sentAt >= SENT_TEXT_GUARD_MS) return false;
-
-        if (!draftUpdatedAt || draftUpdatedAt <= sentAt) return true;
 
         const sentText = localStorage.getItem(sentTextKey) || '';
         const confirmedSentText = localStorage.getItem(confirmedSentTextKey) || '';
-        return Boolean(normalizedDraft && (normalizedDraft === sentText || normalizedDraft === confirmedSentText));
+        if (normalizedDraft && (normalizedDraft === sentText || normalizedDraft === confirmedSentText)) return true;
+
+        if (!sentAt) return false;
+
+        if (!draftUpdatedAt || draftUpdatedAt <= sentAt) return true;
+        return false;
     }
 
     function getActiveTextarea() {
@@ -705,6 +702,7 @@
 
     async function reconcileSentDraftWithChatHistory(convoId = getConversationId()) {
         if (!convoId || !chrome.runtime?.id) return;
+        let reconciled = false;
 
         try {
             const result = await chrome.storage.local.get(['ETSY_CHAT_HISTORY']);
@@ -722,20 +720,25 @@
             const sentText = localStorage.getItem(keys.sentTextKey) || '';
             const confirmedSentText = localStorage.getItem(keys.confirmedSentTextKey) || '';
 
-            if (latestText === sentText || latestText === confirmedSentText) {
-                localStorage.setItem(keys.confirmedSentTextKey, latestText);
-                localStorage.setItem(keys.confirmedSentAtKey, String(getMessageTimestampMs(latestSellerMessage) || Date.now()));
+            localStorage.setItem(keys.confirmedSentTextKey, latestText);
+            localStorage.setItem(keys.confirmedSentAtKey, String(getMessageTimestampMs(latestSellerMessage) || Date.now()));
+            reconciled = true;
 
-                if (draftUpdatedAt) {
-                    const draft = localStorage.getItem(keys.draftKey) || '';
-                    if (normalizeDraftText(draft) === latestText) {
-                        removeStoredDraft(convoId);
-                    }
+            const draft = localStorage.getItem(keys.draftKey) || '';
+            if (normalizeDraftText(draft) === latestText) {
+                removeStoredDraft(convoId);
+
+                const activeTextarea = getActiveTextarea();
+                if (activeTextarea && normalizeDraftText(activeTextarea.value) === latestText) {
+                    activeTextarea.value = '';
+                    activeTextarea.dispatchEvent(new Event('input', { bubbles: true }));
                 }
             }
         } catch (error) {
             console.warn('⚠️ Failed to reconcile sent draft with chat history:', error);
         }
+
+        return reconciled;
     }
 
     function forceCleanupChatMode() {
@@ -1074,13 +1077,17 @@
 
         if (area && m) {
             const id = m[1];
-            setupDraftPersistence(area, id);
-            setupDraftCleaner(area);
             if (area.dataset.reconciledChatHistoryConvoId !== id) {
                 reconcileSentDraftWithChatHistory(id).catch(err => {
                     console.warn('⚠️ Failed initial draft reconciliation:', err);
+                }).finally(() => {
+                    setupDraftPersistence(area, id);
+                    setupDraftCleaner(area);
                 });
                 area.dataset.reconciledChatHistoryConvoId = id;
+            } else {
+                setupDraftPersistence(area, id);
+                setupDraftCleaner(area);
             }
         }
 
