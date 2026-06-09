@@ -4,8 +4,11 @@
 class GeminiService extends BaseAIService {
     constructor() {
         super();
+        // Keep the total user wait bounded, but never start a fallback attempt
+        // with only a couple of seconds left.
         this.requestTimeoutMs = 30000;
         this.totalRequestBudgetMs = 60000;
+        this.minimumAttemptBudgetMs = 10000;
         this.overloadedRetryDelaysMs = [1500, 3000];
         this.lastRequestDiagnostics = null;
     }
@@ -209,7 +212,7 @@ AI: ${aiResponse}`;
         }
     }
 
-    async streamMessage({ modelId, apiKey, messages, systemInstruction, onChunk, onComplete, onError, onStatus }) {
+    async streamMessage({ modelId, apiKey, messages, systemInstruction, onChunk, onComplete, onError, onStatus, abortSignal }) {
         const models = this._buildFallbackList(modelId);
         let lastError = null;
         let chunkDelivered = false;
@@ -233,7 +236,7 @@ AI: ${aiResponse}`;
             const currentModel = models[i];
             const remainingBudgetMs = this.totalRequestBudgetMs - (Date.now() - startedAt);
 
-            if (remainingBudgetMs <= 0) {
+            if (remainingBudgetMs < this.minimumAttemptBudgetMs) {
                 lastError = new Error(`Gemini fallback timed out after ${Math.round(this.totalRequestBudgetMs / 1000)}s`);
                 break;
             }
@@ -258,7 +261,8 @@ AI: ${aiResponse}`;
                     onChunk: wrappedOnChunk,
                     onComplete,
                     timeoutMs: attemptTimeoutMs,
-                    thinkingMode
+                    thinkingMode,
+                    abortSignal
                 });
                 this.lastRequestDiagnostics.attempts.push({
                     modelId: currentModel,
@@ -283,6 +287,10 @@ AI: ${aiResponse}`;
                 });
 
                 if (!chunkDelivered && this._isThinkingConfigError(error)) {
+                    const plainRetryBudgetMs = this.totalRequestBudgetMs - (Date.now() - startedAt);
+                    if (plainRetryBudgetMs < this.minimumAttemptBudgetMs) {
+                        break;
+                    }
                     const retryStartedAt = Date.now();
                     try {
                         const result = await this._streamMessageInternal({
@@ -292,8 +300,9 @@ AI: ${aiResponse}`;
                             systemInstruction,
                             onChunk: wrappedOnChunk,
                             onComplete,
-                            timeoutMs: Math.min(this.requestTimeoutMs, this.totalRequestBudgetMs - (Date.now() - startedAt)),
-                            thinkingMode: null
+                            timeoutMs: Math.min(this.requestTimeoutMs, plainRetryBudgetMs),
+                            thinkingMode: null,
+                            abortSignal
                         });
                         this.lastRequestDiagnostics.attempts.push({
                             modelId: currentModel,
@@ -326,7 +335,7 @@ AI: ${aiResponse}`;
                     for (let retryIndex = 0; retryIndex < this.overloadedRetryDelaysMs.length; retryIndex++) {
                         const retryDelayMs = this.overloadedRetryDelaysMs[retryIndex];
                         const retryRemainingBudgetMs = this.totalRequestBudgetMs - (Date.now() - startedAt) - retryDelayMs;
-                        if (retryRemainingBudgetMs <= 0) break;
+                        if (retryRemainingBudgetMs < this.minimumAttemptBudgetMs) break;
 
                         if (onStatus) {
                             onStatus({
@@ -351,7 +360,8 @@ AI: ${aiResponse}`;
                                 onChunk: wrappedOnChunk,
                                 onComplete,
                                 timeoutMs: Math.min(this.requestTimeoutMs, retryRemainingBudgetMs),
-                                thinkingMode
+                                thinkingMode,
+                                abortSignal
                             });
                             this.lastRequestDiagnostics.attempts.push({
                                 modelId: currentModel,
@@ -408,7 +418,7 @@ AI: ${aiResponse}`;
         throw lastError;
     }
 
-    async _streamMessageInternal({ modelId, apiKey, messages, systemInstruction, onChunk, onComplete, onError, attempt = 0, timeoutMs = this.requestTimeoutMs, thinkingMode = null }) {
+    async _streamMessageInternal({ modelId, apiKey, messages, systemInstruction, onChunk, onComplete, onError, attempt = 0, timeoutMs = this.requestTimeoutMs, thinkingMode = null, abortSignal = null }) {
         const url = `${this.getApiEndpoint()}${modelId}:streamGenerateContent?alt=sse`;
 
         const contents = this._formatMessagesForGemini(messages);
@@ -417,6 +427,13 @@ AI: ${aiResponse}`;
 
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+        let externalAbortHandler = null;
+
+        if (abortSignal) {
+            if (abortSignal.aborted) controller.abort();
+            externalAbortHandler = () => controller.abort();
+            abortSignal.addEventListener('abort', externalAbortHandler, { once: true });
+        }
 
         try {
 
@@ -484,12 +501,20 @@ AI: ${aiResponse}`;
 
         } catch (error) {
             if (error?.name === 'AbortError') {
+                if (abortSignal?.aborted) {
+                    const stopError = new Error('AI request was stopped.');
+                    stopError.cancelled = true;
+                    throw stopError;
+                }
                 throw new Error(`Gemini request timed out after ${Math.round(timeoutMs / 1000)}s`);
             }
             // Don't call onError during retry attempts - let the outer streamMessage handle it
             throw error;
         } finally {
             clearTimeout(timeoutId);
+            if (abortSignal && externalAbortHandler) {
+                abortSignal.removeEventListener('abort', externalAbortHandler);
+            }
         }
     }
 }

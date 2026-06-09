@@ -89,3 +89,23 @@
 **Фікс.** Draft logic має бути per-textarea/per-button через `dataset`, з `draft_updated_at_<id>`, `sent_<id>`, `sent_text_<id>` і коротким guard-window. Після send exact sent text не можна зберігати як draft, legacy draft без timestamp після `sent_<id>` треба відкидати як ambiguous.
 
 **Lesson.** Для draft-autosave після submit потрібна state-machine, а не "remove on click". Будь-який post-submit `input` race має перевіряти last-sent text + timestamps, інакше UI framework може воскресити вже відправлений текст.
+
+---
+
+## 2026-06-01 — Copy buttons must not carry raw code in HTML attributes
+
+**Мистейк.** `parseMarkdown()` у `src/content/chat_ui.js` клала code text у `data-code="..."` для copy buttons. Для inline/code blocks із `"5-6"` HTML-attribute parsing обрізав value на першій подвійній лапці, тому `dataset.code` був неповним і clipboard отримував truncated text.
+
+**Фікс.** Не зберігати payload у HTML-атрибуті. Рендерити visible code окремо, а copy handler читатиме `textContent` із DOM (`code` / `.inline-code-text`) перед `navigator.clipboard.writeText()`.
+
+**Lesson.** HTML attributes — не безпечне сховище для arbitrary text. Якщо значення має йти в clipboard, краще брати його з DOM text node або окремого JS state, а не з `data-*` через `innerHTML`.
+
+---
+
+## 2026-06-09 — Active Etsy listing context can arrive after prompt build starts
+
+**Мистейк.** `getRAGContext()` на messages pages міг будувати `PRODUCT_CONTEXT` раніше, ніж `etsy_context_interceptor.js` встигав витягнути `ETSY_CURRENT_LISTING_ID` і ніж `link_discovery.js` встигав покласти `RAG_LISTING_<id>` у storage. У результаті prompt ішов без активного listing, хоча data вже приходила трохи пізніше.
+
+**Фікс.** Зробити extraction listing ID більш tolerant до різних форм detail payload, запускати discovery автоматично через storage/navigation events і додати короткий wait/fallback у `getRAGContext()` перед складанням `PRODUCT_CONTEXT`.
+
+**Lesson.** Для SPA-пейджів не можна покладатися лише на focus/input як trigger. Якщо контекст приходить асинхронно з кількох storage кроків, prompt builder повинен або чекати готовності, або повторно підтягувати дані перед генерацією.

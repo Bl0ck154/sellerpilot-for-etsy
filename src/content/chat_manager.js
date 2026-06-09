@@ -381,13 +381,67 @@
             draftUpdatedAtKey: 'draft_updated_at_' + id,
             sentKey: 'sent_' + id,
             sentTextKey: 'sent_text_' + id,
-            sentTextGuardKey: 'sent_text_guard_until_' + id
+            sentTextGuardKey: 'sent_text_guard_until_' + id,
+            confirmedSentTextKey: 'confirmed_sent_text_' + id,
+            confirmedSentAtKey: 'confirmed_sent_at_' + id
         };
     }
 
     function readStorageTimestamp(key) {
         const value = parseInt(localStorage.getItem(key) || '0', 10);
         return Number.isFinite(value) ? value : 0;
+    }
+
+    function getMessageText(msg) {
+        return String(msg?.message_body || msg?.message || msg?.body || msg?.text || '').trim();
+    }
+
+    function getMessageTimestampMs(msg) {
+        const raw = msg?.create_date || msg?.timestamp || msg?.created_at || msg?.sent_at;
+        if (!raw) return 0;
+
+        if (typeof raw === 'number') {
+            return raw > 1e12 ? raw : raw * 1000;
+        }
+
+        const parsed = Date.parse(raw);
+        return Number.isFinite(parsed) ? parsed : 0;
+    }
+
+    function isSellerAuthoredMessage(msg) {
+        if (!msg) return false;
+
+        const roleText = `${msg.sender_type || ''} ${msg.role || ''} ${msg.author_role || ''}`.toLowerCase();
+        if (/seller|shop|owner/.test(roleText)) return true;
+        if (/buyer|customer/.test(roleText)) return false;
+
+        if (msg.is_seller === true || msg.is_shop_member === true || msg.from_owner === true) return true;
+        if (msg.is_customer === true) return false;
+
+        return false;
+    }
+
+    function getLatestSellerMessage(chatHistory) {
+        const messages = chatHistory?.messages || [];
+        let latestMessage = null;
+        let latestTimestamp = 0;
+
+        for (const msg of messages) {
+            if (!isSellerAuthoredMessage(msg)) continue;
+            const ts = getMessageTimestampMs(msg);
+            if (!latestMessage || ts >= latestTimestamp) {
+                latestMessage = msg;
+                latestTimestamp = ts;
+            }
+        }
+
+        return latestMessage;
+    }
+
+    function shouldClearConfirmedSentDraft(draftUpdatedAt, confirmedSentAt) {
+        if (!confirmedSentAt) return false;
+        if (!draftUpdatedAt) return true;
+        return draftUpdatedAt <= (confirmedSentAt + SENT_TEXT_GUARD_MS);
     }
 
     function removeStoredDraft(id) {
@@ -397,9 +451,11 @@
     }
 
     function clearSentTextGuard(id) {
-        const { sentTextKey, sentTextGuardKey } = getDraftStorageKeys(id);
+        const { sentTextKey, sentTextGuardKey, confirmedSentTextKey, confirmedSentAtKey } = getDraftStorageKeys(id);
         localStorage.removeItem(sentTextKey);
         localStorage.removeItem(sentTextGuardKey);
+        localStorage.removeItem(confirmedSentTextKey);
+        localStorage.removeItem(confirmedSentAtKey);
     }
 
     function isGuardedSentText(id, normalizedText) {
@@ -421,7 +477,7 @@
         if (!id) return;
 
         const normalized = normalizeDraftText(text);
-        const { sentKey, sentTextKey, sentTextGuardKey } = getDraftStorageKeys(id);
+        const { sentKey, sentTextKey, sentTextGuardKey, confirmedSentTextKey, confirmedSentAtKey } = getDraftStorageKeys(id);
         const now = Date.now();
 
         removeStoredDraft(id);
@@ -430,6 +486,8 @@
         if (normalized) {
             localStorage.setItem(sentTextKey, normalized);
             localStorage.setItem(sentTextGuardKey, (now + SENT_TEXT_GUARD_MS).toString());
+            localStorage.setItem(confirmedSentTextKey, normalized);
+            localStorage.setItem(confirmedSentAtKey, now.toString());
         } else {
             clearSentTextGuard(id);
         }
@@ -501,7 +559,7 @@
     }
 
     function restoreStoredDraft(area, id) {
-        const { draftKey, draftUpdatedAtKey, sentKey, sentTextKey } = getDraftStorageKeys(id);
+        const { draftKey, draftUpdatedAtKey, sentKey, sentTextKey, confirmedSentTextKey, confirmedSentAtKey } = getDraftStorageKeys(id);
         const savedDraft = localStorage.getItem(draftKey);
         if (!savedDraft) return;
 
@@ -509,9 +567,15 @@
         const draftUpdatedAt = readStorageTimestamp(draftUpdatedAtKey);
         const lastSentAt = readStorageTimestamp(sentKey);
         const lastSentText = localStorage.getItem(sentTextKey) || '';
+        const confirmedSentText = localStorage.getItem(confirmedSentTextKey) || '';
+        const confirmedSentAt = readStorageTimestamp(confirmedSentAtKey);
         let shouldRestore = Boolean(normalizedDraft);
 
         if (shouldRestore && isGuardedSentText(id, normalizedDraft)) {
+            shouldRestore = false;
+        }
+
+        if (shouldRestore && confirmedSentText && normalizedDraft === confirmedSentText && shouldClearConfirmedSentDraft(draftUpdatedAt, confirmedSentAt)) {
             shouldRestore = false;
         }
 
@@ -581,6 +645,41 @@
             form.dataset.draftSubmitCleanerAttached = 'true';
         }
 
+    }
+
+    async function reconcileSentDraftWithChatHistory(convoId = getConversationId()) {
+        if (!convoId || !chrome.runtime?.id) return;
+
+        try {
+            const result = await chrome.storage.local.get(['ETSY_CHAT_HISTORY']);
+            const chatHistory = result.ETSY_CHAT_HISTORY;
+            if (!chatHistory?.messages || String(chatHistory.convo_id) !== String(convoId)) return;
+
+            const latestSellerMessage = getLatestSellerMessage(chatHistory);
+            if (!latestSellerMessage) return;
+
+            const latestText = normalizeDraftText(getMessageText(latestSellerMessage));
+            if (!latestText) return;
+
+            const keys = getDraftStorageKeys(convoId);
+            const draftUpdatedAt = readStorageTimestamp(keys.draftUpdatedAtKey);
+            const sentText = localStorage.getItem(keys.sentTextKey) || '';
+            const confirmedSentText = localStorage.getItem(keys.confirmedSentTextKey) || '';
+
+            if (latestText === sentText || latestText === confirmedSentText) {
+                localStorage.setItem(keys.confirmedSentTextKey, latestText);
+                localStorage.setItem(keys.confirmedSentAtKey, String(getMessageTimestampMs(latestSellerMessage) || Date.now()));
+
+                if (draftUpdatedAt) {
+                    const draft = localStorage.getItem(keys.draftKey) || '';
+                    if (normalizeDraftText(draft) === latestText) {
+                        removeStoredDraft(convoId);
+                    }
+                }
+            }
+        } catch (error) {
+            console.warn('⚠️ Failed to reconcile sent draft with chat history:', error);
+        }
     }
 
     function forceCleanupChatMode() {
@@ -921,6 +1020,12 @@
             const id = m[1];
             setupDraftPersistence(area, id);
             setupDraftCleaner(area);
+            if (area.dataset.reconciledChatHistoryConvoId !== id) {
+                reconcileSentDraftWithChatHistory(id).catch(err => {
+                    console.warn('⚠️ Failed initial draft reconciliation:', err);
+                });
+                area.dataset.reconciledChatHistoryConvoId = id;
+            }
         }
 
         // Inject attachments viewer (optimized with caching)
@@ -1023,6 +1128,9 @@
                 // Immediately update attachments viewer
                 injectAttachmentsViewer().catch(err => {
                     console.warn('⚠️ Failed to update attachments on storage change:', err);
+                });
+                reconcileSentDraftWithChatHistory().catch(err => {
+                    console.warn('⚠️ Failed to reconcile draft on storage change:', err);
                 });
             }
         };

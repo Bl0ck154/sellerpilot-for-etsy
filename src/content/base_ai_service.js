@@ -163,32 +163,46 @@ ${markdown ? `\n\nPAGE CONTENT:\n${markdown}` : ''}`;
                     return '';
                 }
 
-                // 1. Build prioritized list of listing IDs to pull from cache.
-                // Primary = the listing the user is actively looking at (editor / public / transaction).
-                // Secondary = other listings referenced on the page (chat attachments, recent orders, etc.)
-                const primaryIds = [];
-                const secondaryIds = [];
+                const collectListingIds = async () => {
+                    // 1. Build prioritized list of listing IDs to pull from cache.
+                    // Primary = the listing the user is actively looking at (editor / public / transaction).
+                    // Secondary = other listings referenced on the page (chat attachments, recent orders, etc.)
+                    const primaryIds = [];
+                    const secondaryIds = [];
 
-                if (onEditor) {
-                    primaryIds.push(path.match(/edit\/(\d+)/)[1]);
-                } else if (onPublicListing) {
-                    primaryIds.push(path.match(/\/listing\/(\d+)/)[1]);
-                } else if (onMessages && chrome.runtime?.id) {
-                    try {
-                        const result = await chrome.storage.local.get(['ETSY_CURRENT_LISTING_ID']);
-                        if (result.ETSY_CURRENT_LISTING_ID) primaryIds.push(result.ETSY_CURRENT_LISTING_ID);
-                    } catch (_) { /* ignore, fall back to DOM scanning */ }
+                    if (onEditor) {
+                        primaryIds.push(path.match(/edit\/(\d+)/)[1]);
+                    } else if (onPublicListing) {
+                        primaryIds.push(path.match(/\/listing\/(\d+)/)[1]);
+                    } else if (onMessages && chrome.runtime?.id) {
+                        try {
+                            const result = await chrome.storage.local.get(['ETSY_CURRENT_LISTING_ID']);
+                            if (result.ETSY_CURRENT_LISTING_ID) primaryIds.push(String(result.ETSY_CURRENT_LISTING_ID));
+                        } catch (_) { /* ignore, fall back to DOM scanning */ }
+                    }
+
+                    // Scan DOM for additional listing references
+                    for (const url of this.scanCurrentChatForListings()) {
+                        const id = url.match(/\/listing\/(\d+)/)?.[1];
+                        if (!id) continue;
+                        if (primaryIds.includes(id) || secondaryIds.includes(id)) continue;
+                        secondaryIds.push(id);
+                    }
+
+                    return {
+                        primaryIds,
+                        secondaryIds,
+                        allIds: [...primaryIds, ...secondaryIds].slice(0, 5)
+                    };
+                };
+
+                let { primaryIds, secondaryIds, allIds } = await collectListingIds();
+
+                if (onMessages && allIds.length === 0) {
+                    await this.waitForListingContext(1500);
+                    ({ primaryIds, secondaryIds, allIds } = await collectListingIds());
                 }
 
-                // Scan DOM for additional listing references
-                for (const url of this.scanCurrentChatForListings()) {
-                    const id = url.match(/\/listing\/(\d+)/)?.[1];
-                    if (!id) continue;
-                    if (primaryIds.includes(id) || secondaryIds.includes(id)) continue;
-                    secondaryIds.push(id);
-                }
-
-                const allIds = [...primaryIds, ...secondaryIds].slice(0, 5); // cap at 5 to keep prompt small
                 if (allIds.length === 0) return '';
 
                 // 2. Load cached data for those IDs only (avoid reading the whole storage)
@@ -211,6 +225,25 @@ ${markdown ? `\n\nPAGE CONTENT:\n${markdown}` : ''}`;
 
                     const isPrimary = primaryIds.includes(id);
                     (isPrimary ? primary : secondary).push({ id, cached, ageMs: age });
+                }
+
+                if (onMessages && primaryIds.length > 0 && primary.length === 0) {
+                    await this.waitForListingContext(1000);
+                    const refreshed = await chrome.storage.local.get(keys);
+                    primary.length = 0;
+                    secondary.length = 0;
+
+                    for (let i = 0; i < allIds.length; i++) {
+                        const id = allIds[i];
+                        const storageKey = `RAG_LISTING_${id}`;
+                        const cached = refreshed[storageKey];
+                        if (!cached || !cached.title) continue;
+                        const age = now - (cached.timestamp || 0);
+                        if (age > TTL_24_HOURS) { expiredKeys.push(storageKey); continue; }
+
+                        const isPrimary = primaryIds.includes(id);
+                        (isPrimary ? primary : secondary).push({ id, cached, ageMs: age });
+                    }
                 }
 
                 if (expiredKeys.length > 0) {
@@ -245,6 +278,34 @@ ${markdown ? `\n\nPAGE CONTENT:\n${markdown}` : ''}`;
                 console.warn('⚠️ RAG: Failed to load context:', error);
                 return '';
             }
+        },
+
+        /**
+         * Wait briefly for listing context hydration on message pages.
+         * Helps bridge the gap between conversation parsing and cached RAG data.
+         */
+        async waitForListingContext(timeoutMs = 1500) {
+            const started = Date.now();
+            while (Date.now() - started < timeoutMs) {
+                try {
+                    const result = await chrome.storage.local.get([
+                        'ETSY_CURRENT_LISTING_ID'
+                    ]);
+                    if (result.ETSY_CURRENT_LISTING_ID) {
+                        const storageKey = `RAG_LISTING_${result.ETSY_CURRENT_LISTING_ID}`;
+                        const cached = await chrome.storage.local.get([storageKey]);
+                        if (cached[storageKey]?.title) {
+                            return true;
+                        }
+                    }
+                } catch (_) {
+                    return false;
+                }
+
+                await new Promise(resolve => setTimeout(resolve, 250));
+            }
+
+            return false;
         },
 
         /**

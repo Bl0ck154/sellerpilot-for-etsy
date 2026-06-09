@@ -105,15 +105,17 @@ window.EtsyContextInterceptor = (function () {
             }
         }
 
-        // Get listing_id from transaction
+        // Get listing_id from detail payload first; fall back to transaction redirect.
+        let listingId = extractListingId(detail);
         const transactionId = receiptHistory[0]?.transactions?.[0]?.transaction_id;
-        if (transactionId) {
-            const listingId = await getListingIdFromTransaction(transactionId);
-            if (listingId && chrome.runtime?.id) {
-                await chrome.storage.local.set({
-                    [STORAGE_KEYS.CURRENT_LISTING_ID]: listingId
-                });
-            }
+        if (!listingId && transactionId) {
+            listingId = await getListingIdFromTransaction(transactionId);
+        }
+
+        if (listingId && chrome.runtime?.id) {
+            await chrome.storage.local.set({
+                [STORAGE_KEYS.CURRENT_LISTING_ID]: String(listingId)
+            });
         } else {
             // Clear stale listing_id if no transaction in current chat
             if (chrome.runtime?.id) {
@@ -246,6 +248,67 @@ window.EtsyContextInterceptor = (function () {
     function getConvoIdFromUrl() {
         const match = window.location.pathname.match(/\/messages\/(\d+)/);
         return match ? match[1] : null;
+    }
+
+    function normalizeListingId(value) {
+        if (value === null || value === undefined) return null;
+        const match = String(value).match(/\d{5,}/);
+        return match ? match[0] : null;
+    }
+
+    function extractListingId(detail) {
+        if (!detail) return null;
+
+        const directCandidates = [
+            detail.listing_id,
+            detail.listingId,
+            detail.listing?.listing_id,
+            detail.listing?.listingId,
+            detail.transaction?.listing_id,
+            detail.transaction?.listingId,
+            detail.receipt_history?.[0]?.transactions?.[0]?.listing_id,
+            detail.receipt_history?.[0]?.transactions?.[0]?.listingId,
+            detail.receipt_history?.[0]?.transactions?.[0]?.listing?.listing_id,
+            detail.receipt_history?.[0]?.transactions?.[0]?.listing?.listingId
+        ];
+
+        for (const candidate of directCandidates) {
+            const id = normalizeListingId(candidate);
+            if (id) return id;
+        }
+
+        const seen = new Set();
+        const stack = [detail.receipt_history, detail.messages, detail.order, detail.receipt, detail.transaction];
+
+        while (stack.length > 0) {
+            const item = stack.pop();
+            if (!item || typeof item !== 'object' || seen.has(item)) continue;
+            seen.add(item);
+
+            if (Array.isArray(item)) {
+                for (const child of item) stack.push(child);
+                continue;
+            }
+
+            for (const [key, value] of Object.entries(item)) {
+                const lowerKey = key.toLowerCase();
+                if ((lowerKey === 'listing_id' || lowerKey === 'listingid') && value) {
+                    const id = normalizeListingId(value);
+                    if (id) return id;
+                }
+
+                if (typeof value === 'string' && /listing/.test(lowerKey + value)) {
+                    const match = value.match(/\/listing\/(\d{5,})/);
+                    if (match) return match[1];
+                }
+
+                if (value && typeof value === 'object') {
+                    stack.push(value);
+                }
+            }
+        }
+
+        return null;
     }
 
     /**

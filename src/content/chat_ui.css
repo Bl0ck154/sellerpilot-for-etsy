@@ -647,9 +647,14 @@
     margin-left: auto;
 }
 
+.etsy-ai-hidden-action {
+    display: none !important;
+}
+
 .etsy-ai-generate-btn,
 .etsy-ai-actions-btn,
-.etsy-ai-send-btn {
+.etsy-ai-send-btn,
+.etsy-ai-stop-btn {
     background: transparent;
     border: none;
     cursor: pointer;
@@ -664,13 +669,24 @@
 
 .etsy-ai-generate-btn:hover,
 .etsy-ai-actions-btn:hover,
-.etsy-ai-send-btn:hover {
+.etsy-ai-send-btn:hover,
+.etsy-ai-stop-btn:hover {
     background-color: var(--hover-bg);
 }
 
 .etsy-ai-send-btn {
     color: var(--primary-color);
     font-weight: bold;
+}
+
+.etsy-ai-stop-btn {
+    color: #DC2626;
+    font-weight: bold;
+}
+
+.etsy-ai-stop-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
 }
 
 /* Modals */

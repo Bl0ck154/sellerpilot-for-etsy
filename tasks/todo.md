@@ -454,3 +454,37 @@
 - [x] Запустити Edge Add-ons release workflow з publish=true: run `26745792657`.
 - [ ] Edge publish result: package uploaded, publish failed with `InProgressSubmission` (`Can't publish extension as your extension submission is in progress. Please try again later.`). Wait/check Partner Center before retrying.
 - [x] Оновити release tracking після workflow, закомітити і запушити.
+
+---
+
+# Фаза 40 — Fix remaining draft resurrection and code-copy truncation (2026-06-01)
+
+## План
+- [x] Знайти всі шляхи збереження й відновлення Etsy draft.
+- [x] Знайти причину обрізання copy на подвійних лапках.
+- [x] Додати confirmed-send reconciliation по `ETSY_CHAT_HISTORY`.
+- [x] Прибрати `data-code` з HTML-кнопок копіювання і читати текст з DOM.
+- [ ] Перевірити build/syntax і зібрати релізну версію.
+
+---
+
+# Фаза 41 — Ensure active listing context hydrates for messages pages (2026-06-09)
+
+## План
+- [x] Додати більш надійний extractor для `ETSY_CURRENT_LISTING_ID` з detail-view payload.
+- [x] Автоматично запускати link discovery при зміні storage і SPA navigation.
+- [x] Додати short wait/fallback у `getRAGContext()` для гонки між detail parse і cache hydration.
+- [x] Перевірити syntax check і rebuild artifacts.
+- [ ] Ручний браузерний тест на `/messages/<id>`: переконатися, що `PRODUCT_CONTEXT` містить активний listing без focus/input.
+
+---
+
+# Фаза 42 — Add Stop button and hide confusing quick actions (2026-06-09)
+
+## План
+- [x] Повернути Gemini total request budget до 60 секунд.
+- [x] Додати Stop кнопку, яка зупиняє активний `AbortController` і скасовує streaming request.
+- [x] Сховати кнопки Reply та ⚡ без видалення залежної логіки.
+- [x] Виправити втрату введеного тексту при натисканні цих елементів.
+- [x] Зробити tooltip адаптивними, щоб вони не виходили за межі екрана.
+- [ ] Ручно перевірити Stop/Retry/tooltip поведінку в браузері.

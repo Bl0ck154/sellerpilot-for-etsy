@@ -152,7 +152,10 @@ function initTooltips() {
         border-radius: 6px;
         font-size: 12px;
         font-weight: 500;
-        white-space: nowrap;
+        max-width: min(260px, calc(100vw - 16px));
+        white-space: normal;
+        overflow-wrap: anywhere;
+        text-align: center;
         z-index: 999999;
         pointer-events: none;
         opacity: 0;
@@ -169,17 +172,20 @@ function initTooltips() {
         tooltipDiv.textContent = text;
         tooltipDiv.style.opacity = '1';
 
-        // Позиціонування завжди знизу
         const rect = target.getBoundingClientRect();
         const tooltipRect = tooltipDiv.getBoundingClientRect();
 
-        let top = rect.bottom + 8; // Завжди знизу
+        let top = rect.bottom + 8;
         let left = rect.left + (rect.width / 2) - (tooltipRect.width / 2);
 
-        // Перевірка виходу за межі екрану (тільки по горизонталі)
-        if (left < 5) left = 5;
-        if (left + tooltipRect.width > window.innerWidth - 5) {
-            left = window.innerWidth - tooltipRect.width - 5;
+        if (top + tooltipRect.height > window.innerHeight - 8) {
+            top = rect.top - tooltipRect.height - 8;
+        }
+
+        if (top < 8) top = 8;
+        if (left < 8) left = 8;
+        if (left + tooltipRect.width > window.innerWidth - 8) {
+            left = window.innerWidth - tooltipRect.width - 8;
         }
 
         tooltipDiv.style.top = `${top}px`;
@@ -406,6 +412,7 @@ function initChat() {
     let currentChatTitle = null; // AI-generated title (will be set after first exchange)
     let loadedSessionId = null; // ID of loaded session from history (to update instead of duplicate)
     let lastUserMessage = null; // Stores last user message context for retry functionality
+    let activeAbortController = null;
     const DEFAULT_SUGGEST_RESPONSE_PROMPT = "Draft a cautious customer reply based on the current Etsy conversation and page context. Write the draft in the customer's conversation language, not necessarily the Owner's language. If the Owner asks to include a greeting, include it; otherwise use a greeting only for a new conversation. Do not accept custom work, promise feasibility, promise timing, or promise an exact result unless I explicitly approved it. If the customer asks for custom work, ask for needed details/references and say we will review before confirming. If the request sounds risky or unrealistic, politely decline or explain that we need to check first.";
     const QUICK_ACTIONS = [
         {
@@ -459,6 +466,7 @@ function initChat() {
         chatBox: document.getElementById('chat-box'),
         userInput: document.getElementById('user-input'),
         sendBtn: document.getElementById('send-btn'),
+        stopBtn: document.getElementById('stop-btn'),
         generateBtn: document.getElementById('generate-btn'),
         quickActionsBtn: document.getElementById('quick-actions-btn'),
         quickActionsMenu: document.getElementById('quick-actions-menu'),
@@ -692,11 +700,13 @@ function initChat() {
         });
 
         ELEMENTS.sendBtn.addEventListener('click', sendMessage);
+        ELEMENTS.stopBtn?.addEventListener('click', stopActiveRequest);
 
         setupQuickActionsMenu();
 
-        // "Suggest Reply" shortcut
-        ELEMENTS.generateBtn.addEventListener('click', async () => {
+        // "Suggest Reply" shortcut (currently hidden from UI; keep handler safe)
+        ELEMENTS.generateBtn?.addEventListener('click', async () => {
+            if (ELEMENTS.generateBtn?.classList.contains('etsy-ai-hidden-action')) return;
             const prompt = window.AgentPolicyManager
                 ? await window.AgentPolicyManager.getSuggestResponsePrompt(DEFAULT_SUGGEST_RESPONSE_PROMPT)
                 : DEFAULT_SUGGEST_RESPONSE_PROMPT;
@@ -1188,11 +1198,8 @@ function initChat() {
         ELEMENTS.userInput.innerText = "";
 
         // Set processing state
-        isProcessing = true;
-        ELEMENTS.sendBtn.disabled = true;
-        ELEMENTS.sendBtn.style.opacity = '0.5';
-        ELEMENTS.sendBtn.style.cursor = 'not-allowed';
-        setActionButtonsDisabled(true);
+        activeAbortController = new AbortController();
+        setProcessingState(true);
 
         // 2. Show User Message
         await clearTransientSystemMessagesBeforeRealChat();
@@ -1262,19 +1269,48 @@ function initChat() {
                 ...promptMetadata,
                 ...shopIntelMetadata,
                 ...imageIntelMetadata
-            });
+            }, activeAbortController.signal);
 
         } catch (e) {
             removeLoadingMessage();
-            addErrorMessage(e.message, lastUserMessage);
+            if (e?.cancelled) {
+                addMessage('Request stopped.', 'system');
+            } else {
+                addErrorMessage(e.message, lastUserMessage);
+            }
         } finally {
-            // Re-enable sending
-            isProcessing = false;
-            ELEMENTS.sendBtn.disabled = false;
-            ELEMENTS.sendBtn.style.opacity = '1';
-            ELEMENTS.sendBtn.style.cursor = 'pointer';
-            ELEMENTS.sendBtn.style.pointerEvents = 'auto';
-            setActionButtonsDisabled(false);
+            activeAbortController = null;
+            setProcessingState(false);
+        }
+    }
+
+    function setProcessingState(processing) {
+        isProcessing = processing;
+
+        if (ELEMENTS.sendBtn) {
+            ELEMENTS.sendBtn.style.display = processing ? 'none' : '';
+            ELEMENTS.sendBtn.disabled = processing;
+            ELEMENTS.sendBtn.style.opacity = processing ? '0.5' : '1';
+            ELEMENTS.sendBtn.style.cursor = processing ? 'not-allowed' : 'pointer';
+            ELEMENTS.sendBtn.style.pointerEvents = processing ? 'none' : 'auto';
+        }
+
+        if (ELEMENTS.stopBtn) {
+            ELEMENTS.stopBtn.style.display = processing ? 'flex' : 'none';
+            ELEMENTS.stopBtn.disabled = !processing;
+            ELEMENTS.stopBtn.style.opacity = '1';
+        }
+
+        setActionButtonsDisabled(processing);
+    }
+
+    function stopActiveRequest() {
+        if (!isProcessing || !activeAbortController) return;
+        activeAbortController.abort();
+        showAiStatus('Stopping...');
+        if (ELEMENTS.stopBtn) {
+            ELEMENTS.stopBtn.disabled = true;
+            ELEMENTS.stopBtn.style.opacity = '0.5';
         }
     }
 
@@ -1282,8 +1318,10 @@ function initChat() {
         [ELEMENTS.generateBtn, ELEMENTS.quickActionsBtn].forEach(btn => {
             if (!btn) return;
             btn.disabled = disabled;
-            btn.style.opacity = disabled ? '0.5' : '1';
-            btn.style.pointerEvents = disabled ? 'none' : 'auto';
+            if (!btn.classList.contains('etsy-ai-hidden-action')) {
+                btn.style.opacity = disabled ? '0.5' : '1';
+                btn.style.pointerEvents = disabled ? 'none' : 'auto';
+            }
         });
         if (disabled) closeQuickActionsMenu();
     }
@@ -1309,13 +1347,6 @@ function initChat() {
                 return;
             }
         }
-
-        // Disable buttons IMMEDIATELY to prevent double-clicks during lag
-        ELEMENTS.sendBtn.disabled = true;
-        ELEMENTS.sendBtn.style.opacity = '0.5';
-        ELEMENTS.sendBtn.style.cursor = 'not-allowed';
-        ELEMENTS.sendBtn.style.pointerEvents = 'none';
-        setActionButtonsDisabled(true);
 
         handleChatInteraction(text);
     }
@@ -1367,7 +1398,7 @@ function initChat() {
         html = html.replace(/```(?:\w+)?\s*\n?([\s\S]*?)```/g, (match, code) => {
             const index = codeBlocks.length;
             const escapedCode = escapeHtml(code.trim());
-            codeBlocks.push(`<pre class="code-block-wrapper"><code>${escapedCode}</code><button class="copy-code-btn" data-code="${escapeHtml(escapedCode)}" title="Copy">📋</button></pre>`);
+            codeBlocks.push(`<pre class="code-block-wrapper"><code>${escapedCode}</code><button class="copy-code-btn" type="button" title="Copy">📋</button></pre>`);
             return `🔸CODEBLOCK◆${index}◆`;
         });
 
@@ -1375,7 +1406,7 @@ function initChat() {
         html = html.replace(/`([^`]+)`/g, (match, code) => {
             const index = inlineCodes.length;
             const escapedCode = escapeHtml(code);
-            inlineCodes.push(`<code class="inline-code-wrapper">${escapedCode}<button class="copy-inline-btn" data-code="${escapedCode}" title="Copy">📋</button></code>`);
+            inlineCodes.push(`<code class="inline-code-wrapper"><span class="inline-code-text">${escapedCode}</span><button class="copy-inline-btn" type="button" title="Copy">📋</button></code>`);
             return `🔹INLINECODE◆${index}◆`;
         });
 
@@ -1508,7 +1539,7 @@ function initChat() {
         container.querySelectorAll('.copy-code-btn').forEach(btn => {
             btn.onclick = async (e) => {
                 e.stopPropagation();
-                const code = btn.dataset.code;
+                const code = btn.closest('.code-block-wrapper')?.querySelector('code')?.textContent || '';
                 await copyToClipboard(code, btn);
             };
         });
@@ -1517,7 +1548,7 @@ function initChat() {
         container.querySelectorAll('.copy-inline-btn').forEach(btn => {
             btn.onclick = async (e) => {
                 e.stopPropagation();
-                const code = btn.dataset.code;
+                const code = btn.closest('.inline-code-wrapper')?.querySelector('.inline-code-text')?.textContent || '';
                 await copyToClipboard(code, btn);
             };
         });
@@ -1604,8 +1635,8 @@ function initChat() {
         if (lower.includes('timed out') || lower.includes('timeout')) {
             return {
                 type: 'timeout',
-                title: 'AI took too long to answer.',
-                action: 'Try Retry. If it repeats, send a shorter message or wait a minute.'
+                title: 'Gemini did not respond in time.',
+                action: 'Retry the request. The extension will automatically try the available fallback models.'
             };
         }
         if (text.includes('429') || lower.includes('rate limit') || lower.includes('quota')) {
@@ -1733,6 +1764,7 @@ function initChat() {
 
         // Find the actual button element (user might click SVG inside)
         const button = event?.target?.closest('.retry-btn');
+        const previousError = button?.closest('.etsy-ai-msg.system.error');
 
         // Disable button IMMEDIATELY to prevent double-clicks
         if (button) {
@@ -1743,11 +1775,11 @@ function initChat() {
         }
 
         // Set processing state IMMEDIATELY to prevent race conditions
-        isProcessing = true;
-        ELEMENTS.sendBtn.disabled = true;
-        ELEMENTS.sendBtn.style.opacity = '0.5';
-        ELEMENTS.sendBtn.style.cursor = 'not-allowed';
-        setActionButtonsDisabled(true);
+        activeAbortController = new AbortController();
+        setProcessingState(true);
+
+        // The retry replaces this error state; do not leave stale errors in chat.
+        if (previousError) previousError.remove();
 
         // Don't re-show user message - it's already in the chat from original attempt
         // Just show loading and retry the API call
@@ -1773,18 +1805,19 @@ function initChat() {
                 apiKey: retryContext.apiKey
             };
 
-            await streamAIResponse(retryContext.modelId, retryContext.apiKey, conversationHistory, systemInstruction);
+            await streamAIResponse(retryContext.modelId, retryContext.apiKey, conversationHistory, systemInstruction, {}, activeAbortController.signal);
 
         } catch (e) {
             removeLoadingMessage();
-            // Use retryContext (not lastUserMessage) to maintain original retry context
-            addErrorMessage(e.message, retryContext);
+            if (e?.cancelled) {
+                addMessage('Request stopped.', 'system');
+            } else {
+                // Use retryContext (not lastUserMessage) to maintain original retry context
+                addErrorMessage(e.message, retryContext);
+            }
         } finally {
-            isProcessing = false;
-            ELEMENTS.sendBtn.disabled = false;
-            ELEMENTS.sendBtn.style.opacity = '1';
-            ELEMENTS.sendBtn.style.cursor = 'pointer';
-            setActionButtonsDisabled(false);
+            activeAbortController = null;
+            setProcessingState(false);
         }
     }
 
@@ -1812,6 +1845,7 @@ function initChat() {
 
     function showRetryCountdown(status) {
         console.debug('Gemini retry/fallback status', status);
+        if (status?.message) showAiStatus(status.message);
     }
 
     function sanitizeAIResponse(text) {
@@ -1868,7 +1902,7 @@ function initChat() {
     }
 
     // Обгортка для streaming AI відповіді з UI оновленнями
-    async function streamAIResponse(modelId, apiKey, conversationHistory, systemInstruction, promptMetadata = {}) {
+    async function streamAIResponse(modelId, apiKey, conversationHistory, systemInstruction, promptMetadata = {}, abortSignal = null) {
         let aiMsgDiv = null;
         const startedAt = Date.now();
         let finalText = '';
@@ -1970,7 +2004,8 @@ function initChat() {
                 onChunk,
                 onComplete,
                 onError,
-                onStatus
+                onStatus,
+                abortSignal
             });
 
             await appendAiDiagnostic({
