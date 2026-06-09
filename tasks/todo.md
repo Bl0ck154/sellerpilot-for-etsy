@@ -521,3 +521,14 @@
 - [x] Reconcile latest seller-authored message from `ETSY_CHAT_HISTORY` як confirmed sent text навіть якщо send listener не спрацював.
 - [x] Якщо stored/live textarea value збігається з confirmed sent text, видалити draft і очистити поле.
 - [x] Syntax check і Chrome/Firefox rebuild для `1.6.16`; commit і push виконуються нижче.
+
+---
+
+# Фаза 46 — First-open customer chat separator wording (2026-06-09)
+
+## План
+- [x] Перевірити, чому first-open messages scope показує `Continuing chat with <customer>`.
+- [x] Додати перевірку scoped AI history перед divider.
+- [x] Для нового customer scope показувати `Chat with <customer>`, а для існуючого AI history — `Continuing chat with <customer>`.
+- [x] Bump source/build version to `1.6.17` for the separator hotfix.
+- [x] Syntax check, rebuild, commit і push.

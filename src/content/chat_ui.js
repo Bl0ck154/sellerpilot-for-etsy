@@ -1160,6 +1160,14 @@ function initChat() {
         }
     }
 
+    async function scopeHasRealChatMessages(scopeKey) {
+        const { messagesKey } = getActiveChatStorageKeys(scopeKey);
+        const result = await safeStorageGet([messagesKey]);
+        if (!result) return false;
+
+        return (result[messagesKey] || []).some(msg => msg.type === 'user' || msg.type === 'ai');
+    }
+
     async function getMessageScopeDisplayLabel(scopeKey, context) {
         const convoId = scopeKey?.match(/^messages:(\d+)$/)?.[1] || null;
         const customerName = await getCurrentCustomerDisplayName(convoId);
@@ -2012,7 +2020,9 @@ function initChat() {
         ELEMENTS.chatBox.innerHTML = '';
 
         const customerName = label || await getCurrentCustomerDisplayName();
-        addSystemDivider(`Continuing chat with ${customerName}`);
+        const hasExistingChat = await scopeHasRealChatMessages(scopeKey);
+        if (transitionId !== contextTransitionId || activeAiScopeKey !== scopeKey) return;
+        addSystemDivider(`${hasExistingChat ? 'Continuing chat with' : 'Chat with'} ${customerName}`);
         await loadCurrentChat(scopeKey, transitionId);
     }
 
