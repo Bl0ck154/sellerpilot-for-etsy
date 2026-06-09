@@ -106,6 +106,27 @@ window.ImageIntelligenceManager = (function () {
         return images.slice(-6);
     }
 
+    function extractCustomerImagesFromDom() {
+        const images = [];
+        const seen = new Set();
+        const links = document.querySelectorAll('.quick-refunds-message-images a[href]');
+
+        for (const link of links) {
+            const nestedImage = link.querySelector('img[src]');
+            const url = link.href || nestedImage?.src || '';
+            if (!url || !isImageUrl(url) || seen.has(url)) continue;
+            seen.add(url);
+            images.push({
+                id: `dom-${hashString(url)}`,
+                url,
+                messageId: null,
+                sender: 'Customer'
+            });
+        }
+
+        return images.slice(-6);
+    }
+
     async function loadCache() {
         const result = await getStorage([CACHE_KEY]);
         return result[CACHE_KEY] && typeof result[CACHE_KEY] === 'object' ? result[CACHE_KEY] : {};
@@ -207,7 +228,17 @@ Return JSON only:
     async function getCurrentCustomerImages() {
         const result = await getStorage(['ETSY_CHAT_HISTORY', 'ETSY_GLOBAL_USER_ID', 'ETSY_GLOBAL_SHOP_ID']);
         const ownerIds = new Set([result.ETSY_GLOBAL_USER_ID, result.ETSY_GLOBAL_SHOP_ID].filter(Boolean).map(String));
-        return extractCustomerImages(result.ETSY_CHAT_HISTORY, ownerIds);
+        const storedImages = extractCustomerImages(result.ETSY_CHAT_HISTORY, ownerIds);
+        const domImages = extractCustomerImagesFromDom();
+        const seen = new Set();
+
+        return [...storedImages, ...domImages]
+            .filter(image => {
+                if (!image.url || seen.has(image.url)) return false;
+                seen.add(image.url);
+                return true;
+            })
+            .slice(-6);
     }
 
     async function analyzeCurrentCustomerImages({ limit = MAX_IMAGES_PER_REQUEST, onStatus } = {}) {
@@ -259,8 +290,11 @@ Return JSON only:
             const entry = cache[hashString(image.url)];
             if (entry?.summaryText && Date.now() - entry.updatedAt < TTL_MS) sections.push(entry.summaryText);
         }
-        if (!sections.length) return '';
-        return `\n\n### CUSTOMER_IMAGE_CONTEXT\n(Customer-side image attachments only. Text summaries from Gemini Vision; raw images are not stored.)\n${trimText(sections.join('\n\n'), MAX_CONTEXT_CHARS)}`;
+        const attachmentNotice = `${images.length} customer image attachment(s) are already present in the current conversation. Never ask the customer to send these photos again.`;
+        if (!sections.length) {
+            return `\n\n### CUSTOMER_IMAGE_CONTEXT\n${attachmentNotice}\n(Vision summaries are not available, so do not claim to know image contents.)`;
+        }
+        return `\n\n### CUSTOMER_IMAGE_CONTEXT\n${attachmentNotice}\n(Customer-side image attachments only. Text summaries from Gemini Vision; raw images are not stored.)\n${trimText(sections.join('\n\n'), MAX_CONTEXT_CHARS)}`;
     }
 
     function getMetadata() {

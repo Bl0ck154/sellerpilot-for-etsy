@@ -413,13 +413,10 @@ ${markdown ? `\n\nPAGE CONTENT:\n${markdown}` : ''}`;
                     return ''; // Wrong conversation or no convo_id set
                 }
 
-                // Check timestamp - if data is older than 30 seconds, it's likely stale
+                // The conversation ID is the authoritative stale-data guard. Etsy does not
+                // necessarily refresh detail-view-data every 30 seconds, so rejecting a
+                // matching conversation by age makes its messages and attachments disappear.
                 const age = Date.now() - (chatHistory.timestamp || 0);
-                if (age > 30000) {
-                    // Data is too old, likely from previous session
-                    // Return empty to avoid showing wrong context
-                    return '';
-                }
 
                 let context = `\n\n### CUSTOMER_CONVERSATION_HISTORY [CONTEXT_AGE: ${this.formatAge(age)}]:\n`;
                 context += '(Messages between the Owner and the customer, oldest → newest.)\n\n';
@@ -437,6 +434,15 @@ ${markdown ? `\n\nPAGE CONTENT:\n${markdown}` : ''}`;
                     if (msg.attachments?.length > 0 || msg.has_images) {
                         context += `  📎 ${msg.attachments?.length || 'Image'} attachment(s)\n`;
                     }
+                }
+
+                // Etsy sometimes renders message images in the DOM without exposing them in
+                // the intercepted message payload. Explicitly tell the model they already exist.
+                const domAttachmentLinks = Array.from(document.querySelectorAll(
+                    '.quick-refunds-message-images a[href], .quick-refunds-message-images img[src]'
+                ));
+                if (domAttachmentLinks.length > 0) {
+                    context += `\n[ATTACHMENTS_ALREADY_PRESENT: ${domAttachmentLinks.length} customer image(s) are already visible in this conversation. Never ask the customer to send these photos again.]\n`;
                 }
 
                 return context;
