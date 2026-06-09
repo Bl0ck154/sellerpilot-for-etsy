@@ -451,9 +451,13 @@
     }
 
     function clearSentTextGuard(id) {
-        const { sentTextKey, sentTextGuardKey, confirmedSentTextKey, confirmedSentAtKey } = getDraftStorageKeys(id);
+        const { sentTextKey, sentTextGuardKey } = getDraftStorageKeys(id);
         localStorage.removeItem(sentTextKey);
         localStorage.removeItem(sentTextGuardKey);
+    }
+
+    function clearConfirmedSentText(id) {
+        const { confirmedSentTextKey, confirmedSentAtKey } = getDraftStorageKeys(id);
         localStorage.removeItem(confirmedSentTextKey);
         localStorage.removeItem(confirmedSentAtKey);
     }
@@ -471,6 +475,35 @@
         }
 
         return normalizedText === (localStorage.getItem(sentTextKey) || '');
+    }
+
+    function isRecentlyConfirmedSentText(id, normalizedText) {
+        if (!normalizedText) return false;
+
+        const { confirmedSentTextKey, confirmedSentAtKey } = getDraftStorageKeys(id);
+        const confirmedText = localStorage.getItem(confirmedSentTextKey) || '';
+        const confirmedAt = readStorageTimestamp(confirmedSentAtKey);
+        if (!confirmedText || !confirmedAt) return false;
+
+        if (Date.now() - confirmedAt > SENT_TEXT_GUARD_MS) {
+            clearConfirmedSentText(id);
+            return false;
+        }
+
+        return normalizedText === confirmedText;
+    }
+
+    function suppressResurrectedSentText(textarea, id) {
+        if (!textarea || !id) return false;
+        const normalized = normalizeDraftText(textarea.value);
+        if (!normalized || (!isGuardedSentText(id, normalized) && !isRecentlyConfirmedSentText(id, normalized))) {
+            return false;
+        }
+
+        textarea.value = '';
+        removeStoredDraft(id);
+        textarea.dispatchEvent(new Event('input', { bubbles: true }));
+        return true;
     }
 
     function markDraftSent(id, text) {
@@ -547,13 +580,15 @@
             return;
         }
 
-        if (isGuardedSentText(id, normalized)) {
+        if (isGuardedSentText(id, normalized) || isRecentlyConfirmedSentText(id, normalized)) {
             removeStoredDraft(id);
+            if (e.target.value) {
+                e.target.value = '';
+            }
             return;
         }
 
         const { draftKey, draftUpdatedAtKey } = getDraftStorageKeys(id);
-        clearSentTextGuard(id);
         localStorage.setItem(draftKey, text);
         localStorage.setItem(draftUpdatedAtKey, Date.now().toString());
     }
@@ -612,6 +647,10 @@
             restoreStoredDraft(area, id);
             area.dataset.draftRestoreConvoId = id;
         }
+
+        // React can assign textarea.value without a reliable input event after
+        // submit. Check the live value briefly on each manager pass as well.
+        suppressResurrectedSentText(area, id);
     }
 
     function setupDraftCleaner(textarea) {

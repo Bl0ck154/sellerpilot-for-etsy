@@ -7,7 +7,7 @@ REM ============================================
 echo.
 echo ========================================
 echo   Building Etsy AI Assistant
-echo   Version: 1.6.9
+echo   Version: 1.6.10
 echo ========================================
 echo.
 
