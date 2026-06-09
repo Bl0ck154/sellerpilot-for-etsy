@@ -27,6 +27,9 @@
     let popstateListener = null;
     let hashchangeListener = null;
     const pendingSendTextByConversation = new Map();
+    let nativeTextareaValueSetter = null;
+    let textareaValueInterceptorInstalled = false;
+    let suppressingTextareaValueWrite = false;
 
     // Module API
     window.EtsyChatManager = {
@@ -103,6 +106,8 @@
             lastParsedHash = "";
             lastAttachmentsConvoId = null;
             lastAttachmentsHash = null;
+            textareaValueInterceptorInstalled = false;
+            nativeTextareaValueSetter = null;
             isInitialized = false;
         },
 
@@ -370,6 +375,61 @@
         return (text || '').replace(/\s+/g, ' ').trim();
     }
 
+    function setTextareaValue(textarea, value) {
+        if (!textarea) return;
+        if (!nativeTextareaValueSetter) {
+            textarea.value = value;
+            return;
+        }
+
+        suppressingTextareaValueWrite = true;
+        try {
+            nativeTextareaValueSetter.call(textarea, value);
+        } finally {
+            suppressingTextareaValueWrite = false;
+        }
+    }
+
+    function installTextareaValueInterceptor() {
+        if (textareaValueInterceptorInstalled) return;
+
+        try {
+            const descriptor = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value');
+            if (!descriptor?.set) return;
+
+            nativeTextareaValueSetter = descriptor.set;
+            Object.defineProperty(HTMLTextAreaElement.prototype, 'value', {
+                configurable: true,
+                enumerable: descriptor.enumerable,
+                get: descriptor.get,
+                set(value) {
+                    nativeTextareaValueSetter.call(this, value);
+
+                    if (suppressingTextareaValueWrite) return;
+                    if (!this || this.tagName !== 'TEXTAREA') return;
+                    if (!this.classList?.contains('wt-textarea')) return;
+
+                    const id = getTextareaConversationId(this);
+                    if (!id) return;
+                    if (String(id) !== String(getConversationId())) return;
+
+                    const normalized = normalizeDraftText(this.value);
+                    if (!normalized) return;
+
+                    if (isGuardedSentText(id, normalized) || isRecentlyConfirmedSentText(id, normalized)) {
+                        setTextareaValue(this, '');
+                        removeStoredDraft(id);
+                        this.dispatchEvent(new Event('input', { bubbles: true }));
+                    }
+                }
+            });
+
+            textareaValueInterceptorInstalled = true;
+        } catch (error) {
+            console.warn('⚠️ Failed to install textarea value interceptor:', error);
+        }
+    }
+
     function getConversationId() {
         const m = location.href.match(/\/messages\/(\d+)/);
         return m ? m[1] : null;
@@ -500,7 +560,7 @@
             return false;
         }
 
-        textarea.value = '';
+        setTextareaValue(textarea, '');
         removeStoredDraft(id);
         textarea.dispatchEvent(new Event('input', { bubbles: true }));
         return true;
@@ -1161,6 +1221,8 @@
     }
 
     function startMonitoring() {
+        installTextareaValueInterceptor();
+
         // Listen for storage changes to react instantly when interceptor saves chat history
         storageChangeListener = (changes, areaName) => {
             if (areaName === 'local' && changes.ETSY_CHAT_HISTORY) {
