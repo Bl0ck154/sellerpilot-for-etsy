@@ -413,6 +413,9 @@ function initChat() {
     let loadedSessionId = null; // ID of loaded session from history (to update instead of duplicate)
     let lastUserMessage = null; // Stores last user message context for retry functionality
     let activeAbortController = null;
+    let activeAiScopeKey = null;
+    let contextTransitionId = 0;
+    let viewingLegacySession = false;
     const DEFAULT_SUGGEST_RESPONSE_PROMPT = "Draft a cautious customer reply based on the current Etsy conversation and page context. Write the draft in the customer's conversation language, not necessarily the Owner's language. Do not mirror, list, or restate the customer's specific wording or requested edits; answer directly and keep it concise. If I give a broad confirmation like we can do all of that, keep the draft broad too and do not pull details from the customer's message. If the Owner asks to include a greeting, include it; otherwise use a greeting only for a new conversation. Do not accept custom work, promise timing, or promise an exact result unless I explicitly approved it. If I explicitly say to tell the customer yes or that we can do it, treat that as approval and output only the requested confirmation without extra questions, conditions, review language, or next steps. If the page or chat already shows attachments, or the customer says the pictures were sent, never ask for those photos again. When no confirmed order is visible, never request photos, files, or production assets unless I explicitly ask you to request them. If the request sounds risky or unrealistic, only add caution when confirming it would create a specific unsupported promise about exact results, timing, price, or policy.";
     const QUICK_ACTIONS = [
         {
@@ -516,7 +519,7 @@ function initChat() {
         await handleBrowserRestart(); // Auto-save previous chat if exists
         await loadConfiguration();
         window.ShopIntelligenceManager?.maybeBootstrap('startup');
-        restoreState();
+        await restoreState();
         setupListeners();
         await loadCurrentChat(); // Load or start fresh chat
 
@@ -1018,46 +1021,39 @@ function initChat() {
         }
     }
 
-    // Handle browser/extension restart: auto-save old chat
+    // Migrate the pre-scoped active chat once so upgrades do not hide existing data.
     async function handleBrowserRestart() {
         const result = await safeStorageGet(['current_chat_messages', 'current_chat_metadata']);
         if (!result) return;
 
         const messages = result.current_chat_messages || [];
         const metadata = result.current_chat_metadata || {};
-
-        // If there are messages from previous session, save them to history
         const realMessages = messages.filter(m => m.type === 'user' || m.type === 'ai');
-        if (realMessages.length > 0) {
-            // Check if this is a loaded session (stored in metadata)
-            if (metadata.loaded_session_id) {
-                console.log('� Chat was loaded from history, updating existing session:', metadata.loaded_session_id);
-                // Set loadedSessionId so it updates instead of creating duplicate
-                loadedSessionId = metadata.loaded_session_id;
-            } else {
-                console.log('📦 Auto-saving new chat to history...');
-                loadedSessionId = null; // Ensure it's treated as new
-            }
+        if (realMessages.length === 0 || metadata.scope_key) return;
 
-            await saveGlobalChatToHistory(messages, metadata);
+        const storageKeys = getActiveChatStorageKeys(getContextScopeKey({ page_url: location.href }));
+        const scopedResult = await safeStorageGet([storageKeys.messagesKey]);
+        if (!scopedResult || scopedResult[storageKeys.messagesKey]?.length > 0) return;
 
-            // Clear the global chat for fresh start
-            await safeStorageSet({
-                current_chat_messages: [],
-                current_chat_metadata: {}
-            });
-        }
-
-        // Reset loaded session ID after saving
-        loadedSessionId = null;
+        await safeStorageSet({
+            [storageKeys.messagesKey]: messages,
+            [storageKeys.metadataKey]: { ...metadata, scope_key: storageKeys.scopeKey }
+        });
+        await syncLegacyActiveChatMirror(messages, { ...metadata, scope_key: storageKeys.scopeKey });
     }
 
     // Load current global chat on initialization
-    async function loadCurrentChat() {
-        const result = await safeStorageGet(['current_chat_messages']);
+    async function loadCurrentChat(scopeKeyOverride = null, transitionId = contextTransitionId) {
+        const { messagesKey, metadataKey, scopeKey } = getActiveChatStorageKeys(scopeKeyOverride || getActiveAiScopeKey());
+        const result = await safeStorageGet([messagesKey, metadataKey]);
         if (!result) return;
+        if (transitionId !== contextTransitionId || (activeAiScopeKey && activeAiScopeKey !== scopeKey)) return;
 
-        const messages = (result.current_chat_messages || []).filter(msg => !isTransientSystemMessage(msg));
+        activeAiScopeKey = scopeKey;
+        const messages = (result[messagesKey] || []).filter(msg => !isTransientSystemMessage(msg));
+        const metadata = result[metadataKey] || {};
+        loadedSessionId = metadata.loaded_session_id || null;
+        currentChatTitle = metadata.session_title || null;
 
         if (messages.length > 0) {
             messages.forEach(msg => {
@@ -1089,6 +1085,59 @@ function initChat() {
             || text === 'AI diagnostics cleared.';
     }
 
+    function getActiveAiScopeKey(context = CURRENT_CONTEXT) {
+        return activeAiScopeKey || getContextScopeKey(context || { metadata: { url: location.href } });
+    }
+
+    function getActiveChatStorageKeys(scopeKey = getActiveAiScopeKey()) {
+        const suffix = simpleHash(scopeKey || 'global');
+        return {
+            messagesKey: `current_chat_messages_${suffix}`,
+            metadataKey: `current_chat_metadata_${suffix}`,
+            scopeKey
+        };
+    }
+
+    async function syncLegacyActiveChatMirror(messages, metadata) {
+        await safeStorageSet({
+            current_chat_messages: messages || [],
+            current_chat_metadata: metadata || {}
+        });
+    }
+
+    function getCustomerDisplayNameFromHistory(chatHistory) {
+        const messages = chatHistory?.messages || [];
+        for (let i = messages.length - 1; i >= 0; i--) {
+            const msg = messages[i];
+            const roleText = `${msg.sender_type || ''} ${msg.role || ''} ${msg.author_role || ''}`.toLowerCase();
+            if (/seller|shop|owner/.test(roleText)) continue;
+            const name = String(msg.sender_display_name || msg.sender_name || '').trim();
+            if (name) return name;
+        }
+        return 'customer';
+    }
+
+    async function getCurrentCustomerDisplayName(convoId = null) {
+        try {
+            const result = await safeStorageGet(['ETSY_CHAT_HISTORY']);
+            const chatHistory = result?.ETSY_CHAT_HISTORY;
+            if (convoId && chatHistory?.convo_id && String(chatHistory.convo_id) !== String(convoId)) {
+                return 'customer';
+            }
+            return getCustomerDisplayNameFromHistory(chatHistory);
+        } catch (_) {
+            return 'customer';
+        }
+    }
+
+    async function getMessageScopeDisplayLabel(scopeKey, context) {
+        const convoId = scopeKey?.match(/^messages:(\d+)$/)?.[1] || null;
+        const customerName = await getCurrentCustomerDisplayName(convoId);
+        if (customerName && customerName !== 'customer') return customerName;
+
+        return context?.page_content?.title || context?.metadata?.title || 'customer';
+    }
+
     function removeTransientSystemMessagesFromUi() {
         const messages = ELEMENTS.chatBox?.querySelectorAll('.etsy-ai-msg.system');
         if (!messages) return;
@@ -1104,31 +1153,34 @@ function initChat() {
     }
 
     async function clearTransientSystemMessagesBeforeRealChat() {
-        const result = await safeStorageGet(['current_chat_messages']);
+        const { messagesKey, metadataKey } = getActiveChatStorageKeys();
+        const result = await safeStorageGet([messagesKey, metadataKey]);
         if (!result) return;
 
-        const messages = result.current_chat_messages || [];
+        const messages = result[messagesKey] || [];
         const hasRealMessages = messages.some(msg => msg.type === 'user' || msg.type === 'ai');
         if (hasRealMessages) return;
 
         const cleanedMessages = messages.filter(msg => !isTransientSystemMessage(msg));
         if (cleanedMessages.length !== messages.length) {
-            await safeStorageSet({ current_chat_messages: cleanedMessages });
+            const metadata = result[metadataKey] || {};
+            await safeStorageSet({ [messagesKey]: cleanedMessages });
+            await syncLegacyActiveChatMirror(cleanedMessages, metadata);
         }
 
         removeTransientSystemMessagesFromUi();
     }
 
     // Save message to global chat storage
-    async function saveChatToStorage(text, type) {
-        const key = 'current_chat_messages';
+    async function saveChatToStorage(text, type, storageKeys = getActiveChatStorageKeys()) {
+        const { messagesKey, metadataKey, scopeKey } = storageKeys;
 
         try {
-            const result = await safeStorageGet([key, 'current_chat_metadata']);
+            const result = await safeStorageGet([messagesKey, metadataKey]);
             if (!result) return;
 
-            const messages = result[key] || [];
-            const metadata = result.current_chat_metadata || {};
+            const messages = result[messagesKey] || [];
+            const metadata = result[metadataKey] || {};
 
             const newMsg = {
                 text,
@@ -1145,11 +1197,15 @@ function initChat() {
                 metadata.created_at = now;
             }
             metadata.updated_at = now;
+            metadata.scope_key = scopeKey;
 
             await safeStorageSet({
-                [key]: messages,
-                current_chat_metadata: metadata
+                [messagesKey]: messages,
+                [metadataKey]: metadata
             });
+            if (activeAiScopeKey === scopeKey) {
+                await syncLegacyActiveChatMirror(messages, metadata);
+            }
         } catch (e) {
             console.error("Failed to save to global chat:", e);
         }
@@ -1157,6 +1213,11 @@ function initChat() {
 
     // Core Chat Interaction Flow
     async function handleChatInteraction(userMessageText, isSystemAction = false) {
+        if (viewingLegacySession) {
+            addMessage('This pre-upgrade chat is read-only because its Etsy customer is unknown. Start a new chat to continue safely.', 'system');
+            return;
+        }
+
         // Prevent sending while processing
         if (isProcessing) {
             return;
@@ -1194,8 +1255,27 @@ function initChat() {
             }
         }
 
-        // Clear input only after validation passes
+        if (window.EtsyAI_GetFreshContext) {
+            const freshContext = window.EtsyAI_GetFreshContext();
+            if (freshContext) {
+                const freshScopeKey = getContextScopeKey(freshContext);
+                const locationScopeKey = getContextScopeKey({ page_url: location.href });
+                if (freshScopeKey === locationScopeKey) {
+                    await updateContext(freshContext);
+                } else {
+                    console.warn('⚠️ Ignoring stale page context for previous Etsy scope');
+                }
+            } else {
+                console.warn('⚠️ Failed to extract fresh context');
+            }
+        } else {
+            console.error('⚠️ EtsyAI_GetFreshContext not available - content.js may not be loaded yet');
+        }
+
+        // Clear input only after validation and scope refresh pass.
         ELEMENTS.userInput.innerText = "";
+        const requestStorageKeys = getActiveChatStorageKeys();
+        const requestContext = CURRENT_CONTEXT;
 
         // Set processing state
         activeAbortController = new AbortController();
@@ -1203,27 +1283,21 @@ function initChat() {
 
         // 2. Show User Message
         await clearTransientSystemMessagesBeforeRealChat();
+        if (activeAiScopeKey !== requestStorageKeys.scopeKey) {
+            ELEMENTS.userInput.innerText = userMessageText;
+            activeAbortController = null;
+            setProcessingState(false);
+            return;
+        }
         renderMessage(userMessageText, "user");
 
         // 3. Save User Msg to global chat
-        await saveChatToStorage(userMessageText, "user");
+        await saveChatToStorage(userMessageText, "user", requestStorageKeys);
 
         // Show animated loading
         const loadingMsgId = showLoadingDots();
 
         try {
-            // ===== REQUEST FRESH CONTEXT ON-DEMAND =====
-            if (window.EtsyAI_GetFreshContext) {
-                const freshContext = window.EtsyAI_GetFreshContext();
-                if (freshContext) {
-                    CURRENT_CONTEXT = freshContext;
-                } else {
-                    console.warn('⚠️ Failed to extract fresh context');
-                }
-            } else {
-                console.error('⚠️ EtsyAI_GetFreshContext not available - content.js may not be loaded yet');
-            }
-
             // Get AI service instance for the SPECIFIC provider of selected model
             // This ensures we use the correct API (Gemini/DeepSeek/Grok) for the selected model
             aiService = await window.AIServiceFactory.getCurrentService(provider);
@@ -1248,9 +1322,9 @@ function initChat() {
                 ? await window.ImageIntelligenceManager.analyzeCurrentCustomerImages({ onStatus: showAiStatus })
                 : (window.ImageIntelligenceManager ? window.ImageIntelligenceManager.getMetadata() : {});
 
-            // Build conversation history for multi-turn chat from global storage
-            const conversationHistory = await aiService.buildConversationHistory('global_chat', userMessageText);
-            const { systemInstruction } = await aiService.constructPromptData(CURRENT_CONTEXT, userMessageText);
+            // Build conversation history for this Etsy conversation only.
+            const conversationHistory = await aiService.buildConversationHistory(requestStorageKeys.messagesKey, userMessageText);
+            const { systemInstruction } = await aiService.constructPromptData(requestContext, userMessageText);
             const promptMetadata = BaseAIService.INSTRUCTIONS.lastBuildMetadata || {};
             const shopIntelMetadata = window.ShopIntelligenceManager
                 ? await window.ShopIntelligenceManager.getMetadata()
@@ -1261,21 +1335,29 @@ function initChat() {
                 text: userMessageText,
                 provider: provider,
                 modelId: providerModelId,
-                apiKey: providerApiKey
+                apiKey: providerApiKey,
+                historyKey: requestStorageKeys.messagesKey,
+                scopeKey: requestStorageKeys.scopeKey
             };
+
+            if (activeAiScopeKey !== requestStorageKeys.scopeKey) {
+                const cancelled = new Error('Request cancelled after Etsy conversation changed.');
+                cancelled.cancelled = true;
+                throw cancelled;
+            }
 
             // Pass messages instead of contents to be provider-agnostic
             await streamAIResponse(providerModelId, providerApiKey, conversationHistory, systemInstruction, {
                 ...promptMetadata,
                 ...shopIntelMetadata,
                 ...imageIntelMetadata
-            }, activeAbortController.signal);
+            }, activeAbortController.signal, requestStorageKeys);
 
         } catch (e) {
             removeLoadingMessage();
-            if (e?.cancelled) {
+            if (e?.cancelled && activeAiScopeKey === requestStorageKeys.scopeKey) {
                 addMessage('Request stopped.', 'system');
-            } else {
+            } else if (!e?.cancelled && activeAiScopeKey === requestStorageKeys.scopeKey) {
                 addErrorMessage(e.message, lastUserMessage);
             }
         } finally {
@@ -1329,6 +1411,11 @@ function initChat() {
     function sendMessage() {
         const text = ELEMENTS.userInput.innerText.trim();
         if (!text) return;
+
+        if (viewingLegacySession) {
+            addMessage('This pre-upgrade chat is read-only because its Etsy customer is unknown. Start a new chat to continue safely.', 'system');
+            return;
+        }
 
         // Don't send if already processing
         if (isProcessing) {
@@ -1761,6 +1848,7 @@ function initChat() {
     // Handle retry button click
     async function handleRetry(retryContext, event) {
         if (!retryContext || isProcessing) return;
+        if (retryContext.scopeKey && retryContext.scopeKey !== activeAiScopeKey) return;
 
         // Find the actual button element (user might click SVG inside)
         const button = event?.target?.closest('.retry-btn');
@@ -1794,7 +1882,8 @@ function initChat() {
             }
 
             // Rebuild conversation history with fresh context
-            const conversationHistory = await aiService.buildConversationHistory('global_chat', retryContext.text);
+            const historyKey = retryContext.historyKey || getActiveChatStorageKeys().messagesKey;
+            const conversationHistory = await aiService.buildConversationHistory(historyKey, retryContext.text);
             const { systemInstruction } = await aiService.constructPromptData(CURRENT_CONTEXT, retryContext.text);
 
             // Update lastUserMessage with minimal context for potential next retry
@@ -1802,16 +1891,19 @@ function initChat() {
                 text: retryContext.text,
                 provider: retryContext.provider,
                 modelId: retryContext.modelId,
-                apiKey: retryContext.apiKey
+                apiKey: retryContext.apiKey,
+                historyKey,
+                scopeKey: retryContext.scopeKey || activeAiScopeKey
             };
 
-            await streamAIResponse(retryContext.modelId, retryContext.apiKey, conversationHistory, systemInstruction, {}, activeAbortController.signal);
+            const retryStorageKeys = getActiveChatStorageKeys(retryContext.scopeKey || activeAiScopeKey);
+            await streamAIResponse(retryContext.modelId, retryContext.apiKey, conversationHistory, systemInstruction, {}, activeAbortController.signal, retryStorageKeys);
 
         } catch (e) {
             removeLoadingMessage();
-            if (e?.cancelled) {
+            if (e?.cancelled && (!retryContext.scopeKey || retryContext.scopeKey === activeAiScopeKey)) {
                 addMessage('Request stopped.', 'system');
-            } else {
+            } else if (!e?.cancelled && (!retryContext.scopeKey || retryContext.scopeKey === activeAiScopeKey)) {
                 // Use retryContext (not lastUserMessage) to maintain original retry context
                 addErrorMessage(e.message, retryContext);
             }
@@ -1869,15 +1961,35 @@ function initChat() {
     function addSystemDivider(text) {
         const div = document.createElement('div');
         div.className = 'context-divider';
-        div.innerHTML = `<span>${text}</span>`;
+        const span = document.createElement('span');
+        span.textContent = text;
+        div.appendChild(span);
         ELEMENTS.chatBox.appendChild(div);
     }
 
+    async function switchActiveAiScope(scopeKey, label, transitionId = contextTransitionId) {
+        if (transitionId !== contextTransitionId) return;
+        if (!scopeKey || activeAiScopeKey === scopeKey) return;
+
+        if (isProcessing && activeAbortController) {
+            activeAbortController.abort();
+        }
+        activeAiScopeKey = scopeKey;
+        viewingLegacySession = false;
+        currentChatTitle = null;
+        loadedSessionId = null;
+        currentSessionId = null;
+        ELEMENTS.chatBox.innerHTML = '';
+
+        const customerName = label || await getCurrentCustomerDisplayName();
+        addSystemDivider(`Continuing chat with ${customerName}`);
+        await loadCurrentChat(scopeKey, transitionId);
+    }
+
     async function resetActiveChatForNewPage(pageTitle) {
-        await safeStorageSet({
-            current_chat_messages: [],
-            current_chat_metadata: {}
-        });
+        const { messagesKey, metadataKey } = getActiveChatStorageKeys();
+        await safeStorageSet({ [messagesKey]: [], [metadataKey]: {} });
+        await syncLegacyActiveChatMirror([], {});
         currentChatTitle = null;
         loadedSessionId = null;
         currentSessionId = null;
@@ -1902,10 +2014,11 @@ function initChat() {
     }
 
     // Обгортка для streaming AI відповіді з UI оновленнями
-    async function streamAIResponse(modelId, apiKey, conversationHistory, systemInstruction, promptMetadata = {}, abortSignal = null) {
+    async function streamAIResponse(modelId, apiKey, conversationHistory, systemInstruction, promptMetadata = {}, abortSignal = null, storageKeys = getActiveChatStorageKeys()) {
         let aiMsgDiv = null;
         const startedAt = Date.now();
         let finalText = '';
+        const isRequestScopeActive = () => activeAiScopeKey === storageKeys.scopeKey;
         const diagnosticBase = {
             provider: aiService?.getProviderName?.() || 'unknown',
             modelId,
@@ -1936,6 +2049,7 @@ function initChat() {
             // Callbacks для обробки streaming
             let firstChunk = true;
             const onChunk = (chunkText, fullText) => {
+                if (!isRequestScopeActive()) return;
                 finalText = sanitizeAIResponse(fullText);
                 if (firstChunk) {
                     // Прибираємо loading (той, що був створений в handleChatInteraction), показуємо реальний div
@@ -1950,6 +2064,7 @@ function initChat() {
             };
 
             const onComplete = async (fullText) => {
+                if (!isRequestScopeActive()) return;
                 finalText = sanitizeAIResponse(fullText);
                 aiMsgDiv.innerHTML = parseMarkdown(finalText);
                 attachCopyButtonListeners(aiMsgDiv);
@@ -1961,19 +2076,22 @@ function initChat() {
                 aiMsgDiv.appendChild(timestamp);
 
                 const overpromiseRisk = await detectOverpromiseRisk(finalText, diagnosticBase.pageScope || '');
+                if (!isRequestScopeActive()) return;
                 if (overpromiseRisk) {
                     addMessage(`Warning: this draft may overpromise (${overpromiseRisk.matches.join(', ')}). Review before sending or ask me to make it more cautious.`, 'system');
                 }
 
                 // Save to global chat storage
-                await saveChatToStorage(finalText, "ai");
+                await saveChatToStorage(finalText, "ai", storageKeys);
+                if (!isRequestScopeActive()) return;
 
                 // Generate title after first exchange (user message + AI response)
                 // Cache title using first words from AI response (no API call)
                 if (!currentChatTitle) {
-                    const result = await safeStorageGet(['current_chat_messages']);
+                    const { messagesKey } = storageKeys;
+                    const result = await safeStorageGet([messagesKey]);
                     if (result) {
-                        const messages = result.current_chat_messages || [];
+                        const messages = result[messagesKey] || [];
                         // Check if this is first exchange (2 messages: 1 user + 1 AI)
                         const userMessages = messages.filter(m => m.type === 'user');
                         const aiMessages = messages.filter(m => m.type === 'ai');
@@ -1992,7 +2110,7 @@ function initChat() {
             };
 
             const onStatus = (status) => {
-                showRetryCountdown(status);
+                if (isRequestScopeActive()) showRetryCountdown(status);
             };
 
             // Викликаємо AI Service
@@ -2102,6 +2220,7 @@ function initChat() {
                     sessionsIndex[existingSessionIndex].messages = messages;
                     sessionsIndex[existingSessionIndex].updated_at = metadata.updated_at || new Date().toISOString();
                     sessionsIndex[existingSessionIndex].messageCount = messages.length;
+                    sessionsIndex[existingSessionIndex].scope_key = metadata.scope_key || activeAiScopeKey;
 
                     await safeStorageSet({ [indexKey]: sessionsIndex });
                     console.log('✅ Session updated in history');
@@ -2160,6 +2279,7 @@ function initChat() {
             const sessionData = {
                 id: sessionId,
                 title: sessionTitle,
+                scope_key: metadata.scope_key || activeAiScopeKey,
                 created_at: metadata.created_at || new Date().toISOString(),
                 updated_at: metadata.updated_at || new Date().toISOString(),
                 messageCount: messages.length,
@@ -2195,12 +2315,12 @@ function initChat() {
     // Save current global chat session to history
     async function saveCurrentSession() {
         try {
-            // Get current global chat messages
-            const result = await safeStorageGet(['current_chat_messages', 'current_chat_metadata']);
+            const { messagesKey, metadataKey } = getActiveChatStorageKeys();
+            const result = await safeStorageGet([messagesKey, metadataKey]);
             if (!result) return;
 
-            const messages = result.current_chat_messages || [];
-            const metadata = result.current_chat_metadata || {};
+            const messages = result[messagesKey] || [];
+            const metadata = result[metadataKey] || {};
 
             // Only save if there are actual messages
             const realMessages = messages.filter(m => m.type === 'user' || m.type === 'ai');
@@ -2265,7 +2385,7 @@ function initChat() {
         const indexKey = 'sessions_index_all';
         const indexResult = await safeStorageGet([indexKey]);
         if (!indexResult) return; // Extension context invalidated
-        const sessionsIndex = indexResult[indexKey] || [];
+        const sessionsIndex = (indexResult[indexKey] || []).filter(session => !session.scope_key || session.scope_key === activeAiScopeKey);
 
         // Clear and populate history list
         ELEMENTS.historyList.innerHTML = '';
@@ -2361,10 +2481,25 @@ function initChat() {
 
     // Load a specific chat session
     async function loadChatSession(session) {
+        const expectedScopeKey = activeAiScopeKey;
+        if (!session?.scope_key) {
+            viewingLegacySession = true;
+            ELEMENTS.chatBox.innerHTML = '';
+            addSystemDivider('Legacy chat (read-only)');
+            (session.messages || []).forEach(msg => renderMessage(msg.text, msg.type, msg.timestamp));
+            addSystemDivider('Start a new chat to continue in the current Etsy conversation');
+            return;
+        }
+        if (session.scope_key !== expectedScopeKey) return;
+        viewingLegacySession = false;
+
         // Save current session before loading another
-        const currentMessages = await safeStorageGet(['current_chat_messages']);
-        if (currentMessages && currentMessages.current_chat_messages?.length > 0) {
+        const { messagesKey, metadataKey } = getActiveChatStorageKeys();
+        const currentMessages = await safeStorageGet([messagesKey]);
+        if (activeAiScopeKey !== expectedScopeKey) return;
+        if (currentMessages && currentMessages[messagesKey]?.length > 0) {
             await saveCurrentSession();
+            if (activeAiScopeKey !== expectedScopeKey) return;
         }
 
         // Clear current chat UI
@@ -2375,16 +2510,18 @@ function initChat() {
         currentChatTitle = session.title || session.name;
         currentChatId = session.id;
 
-        // Load session messages into global storage
-        await safeStorageSet({
-            current_chat_messages: session.messages || [],
-            current_chat_metadata: {
-                created_at: session.created_at || session.timestamp,
-                updated_at: session.updated_at || session.timestamp,
-                loaded_session_id: session.id,  // CRITICAL: Mark this as loaded from history
-                session_title: session.title || session.name  // Store original title
-            }
-        });
+        const metadata = {
+            created_at: session.created_at || session.timestamp,
+            updated_at: session.updated_at || session.timestamp,
+            loaded_session_id: session.id,
+            session_title: session.title || session.name,
+            scope_key: session.scope_key
+        };
+
+        await safeStorageSet({ [messagesKey]: session.messages || [], [metadataKey]: metadata });
+        if (activeAiScopeKey !== expectedScopeKey) return;
+        await syncLegacyActiveChatMirror(session.messages || [], metadata);
+        if (activeAiScopeKey !== expectedScopeKey) return;
 
         // Render messages
         addSystemDivider(`Loaded: ${session.title || session.name}`);
@@ -2399,11 +2536,11 @@ function initChat() {
     // Start new chat (clear current, save to history)
     async function startNewChat() {
         // Check if there are any messages to save
-        const result = await safeStorageGet(['current_chat_messages', 'current_chat_metadata']);
+        const { messagesKey, metadataKey } = getActiveChatStorageKeys();
+        const result = await safeStorageGet([messagesKey, metadataKey]);
         if (!result) return; // Extension context invalidated
 
-        const currentMessages = result.current_chat_messages || [];
-        const metadata = result.current_chat_metadata || {};
+        const currentMessages = result[messagesKey] || [];
 
         // Only save if there are actual user/AI messages (not just system messages)
         const realMessages = currentMessages.filter(m => m.type === 'user' || m.type === 'ai');
@@ -2411,15 +2548,13 @@ function initChat() {
             await saveCurrentSession();
         }
 
-        // Clear global chat storage
-        await safeStorageSet({
-            current_chat_messages: [],
-            current_chat_metadata: {}
-        });
+        await safeStorageSet({ [messagesKey]: [], [metadataKey]: {} });
+        await syncLegacyActiveChatMirror([], {});
 
         // Reset chat title and loaded session ID
         currentChatTitle = null;
         loadedSessionId = null;
+        viewingLegacySession = false;
 
         // Clear UI
         ELEMENTS.chatBox.innerHTML = '';
@@ -2432,16 +2567,22 @@ function initChat() {
     updateContext = async function (data) {
         if (!data) return;
 
-        const prevScopeKey = getContextScopeKey(CURRENT_CONTEXT);
+        const transitionId = ++contextTransitionId;
+        const prevScopeKey = activeAiScopeKey || getContextScopeKey(CURRENT_CONTEXT);
         const nextScopeKey = getContextScopeKey(data);
+        const nextMessagesMatch = nextScopeKey.match(/^messages:(\d+)$/);
 
-        // If switching to a different Etsy object/page mode, save current session first.
+        // If switching to a different Etsy object/page mode, keep AI history scoped
+        // to that Etsy conversation/page instead of mixing it into one global prompt.
         if (CURRENT_CONTEXT && prevScopeKey !== nextScopeKey) {
-            await saveCurrentSession();
-            const nextTitle = data.page_content?.title || data.metadata?.title || 'Etsy Page';
-            await resetActiveChatForNewPage(nextTitle);
+            const nextTitle = nextMessagesMatch
+                ? await getMessageScopeDisplayLabel(nextScopeKey, data)
+                : (data.page_content?.title || data.metadata?.title || 'Etsy Page');
+            if (transitionId !== contextTransitionId) return;
+            await switchActiveAiScope(nextScopeKey, nextTitle, transitionId);
         }
 
+        if (transitionId !== contextTransitionId) return;
         // Call original function
         await originalUpdateContext.call(this, data);
     };

@@ -109,3 +109,13 @@
 **Фікс.** Зробити extraction listing ID більш tolerant до різних форм detail payload, запускати discovery автоматично через storage/navigation events і додати короткий wait/fallback у `getRAGContext()` перед складанням `PRODUCT_CONTEXT`.
 
 **Lesson.** Для SPA-пейджів не можна покладатися лише на focus/input як trigger. Якщо контекст приходить асинхронно з кількох storage кроків, prompt builder повинен або чекати готовності, або повторно підтягувати дані перед генерацією.
+
+---
+
+## 2026-06-09 — Draft resurrection не можна лікувати prototype interceptor-ом
+
+**Мистейк.** Я додав `HTMLTextAreaElement.prototype.value` interceptor, щоб ловити повернення sent text у Etsy reply textarea. Це було маскуванням симптома: проблему створює наша draft-autosave/restore фіча, яка зберігає/відновлює текст навколо send lifecycle. Prototype patch ускладнює поведінку, ризикує конфліктувати з Etsy/React і не прибирає джерело resurrection.
+
+**Фікс.** Прибирати source of truth, який воскресає sent draft: після send не auto-restore-ити Etsy textarea draft, доки користувач явно не почне новий текст. Для AI chat context не змішувати різні Etsy conversations у один `current_chat_messages` prompt.
+
+**Lesson.** Якщо баг створений нашою persistence-фічею, не ставити глобальні DOM/prototype hooks як перший фікс. Спочатку спростити lifecycle і прибрати небезпечний restore path.

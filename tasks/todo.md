@@ -488,3 +488,15 @@
 - [x] Виправити втрату введеного тексту при натисканні цих елементів.
 - [x] Зробити tooltip адаптивними, щоб вони не виходили за межі екрана.
 - [ ] Ручно перевірити Stop/Retry/tooltip поведінку в браузері.
+
+---
+
+# Фаза 43 — Fix Etsy draft source and isolate AI context by customer chat (2026-06-09)
+
+## План
+- [x] Прибрати невдалий textarea value interceptor: це маскувало symptom, а не джерело resurrection.
+- [x] Зробити Etsy textarea draft restore консервативним після send: не відновлювати stale/exact sent draft, але дозволити новий інший draft після явного input.
+- [x] Ізолювати AI `current_chat_messages` по Etsy conversation id, щоб історія чату A не йшла в prompt для чату B.
+- [x] Додати видимий separator у AI UI при переході/поверненні: `Continuing chat with <customer name>`.
+- [x] Виправити greeting behavior: prompt history для generation/retry читається зі scoped key поточного Etsy chat, а не зі старої global AI history.
+- [x] Syntax check і Chrome/Firefox rebuild для `1.6.15`; commit і push виконуються нижче.

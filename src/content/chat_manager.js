@@ -27,9 +27,6 @@
     let popstateListener = null;
     let hashchangeListener = null;
     const pendingSendTextByConversation = new Map();
-    let nativeTextareaValueSetter = null;
-    let textareaValueInterceptorInstalled = false;
-    let suppressingTextareaValueWrite = false;
 
     // Module API
     window.EtsyChatManager = {
@@ -106,8 +103,6 @@
             lastParsedHash = "";
             lastAttachmentsConvoId = null;
             lastAttachmentsHash = null;
-            textareaValueInterceptorInstalled = false;
-            nativeTextareaValueSetter = null;
             isInitialized = false;
         },
 
@@ -375,61 +370,6 @@
         return (text || '').replace(/\s+/g, ' ').trim();
     }
 
-    function setTextareaValue(textarea, value) {
-        if (!textarea) return;
-        if (!nativeTextareaValueSetter) {
-            textarea.value = value;
-            return;
-        }
-
-        suppressingTextareaValueWrite = true;
-        try {
-            nativeTextareaValueSetter.call(textarea, value);
-        } finally {
-            suppressingTextareaValueWrite = false;
-        }
-    }
-
-    function installTextareaValueInterceptor() {
-        if (textareaValueInterceptorInstalled) return;
-
-        try {
-            const descriptor = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value');
-            if (!descriptor?.set) return;
-
-            nativeTextareaValueSetter = descriptor.set;
-            Object.defineProperty(HTMLTextAreaElement.prototype, 'value', {
-                configurable: true,
-                enumerable: descriptor.enumerable,
-                get: descriptor.get,
-                set(value) {
-                    nativeTextareaValueSetter.call(this, value);
-
-                    if (suppressingTextareaValueWrite) return;
-                    if (!this || this.tagName !== 'TEXTAREA') return;
-                    if (!this.classList?.contains('wt-textarea')) return;
-
-                    const id = getTextareaConversationId(this);
-                    if (!id) return;
-                    if (String(id) !== String(getConversationId())) return;
-
-                    const normalized = normalizeDraftText(this.value);
-                    if (!normalized) return;
-
-                    if (isGuardedSentText(id, normalized) || isRecentlyConfirmedSentText(id, normalized)) {
-                        setTextareaValue(this, '');
-                        removeStoredDraft(id);
-                        this.dispatchEvent(new Event('input', { bubbles: true }));
-                    }
-                }
-            });
-
-            textareaValueInterceptorInstalled = true;
-        } catch (error) {
-            console.warn('⚠️ Failed to install textarea value interceptor:', error);
-        }
-    }
-
     function getConversationId() {
         const m = location.href.match(/\/messages\/(\d+)/);
         return m ? m[1] : null;
@@ -560,7 +500,7 @@
             return false;
         }
 
-        setTextareaValue(textarea, '');
+        textarea.value = '';
         removeStoredDraft(id);
         textarea.dispatchEvent(new Event('input', { bubbles: true }));
         return true;
@@ -586,6 +526,18 @@
         }
 
         pendingSendTextByConversation.delete(id);
+    }
+
+    function isDraftRestoreBlockedAfterSend(id, normalizedDraft, draftUpdatedAt) {
+        const { sentKey, sentTextKey, confirmedSentTextKey } = getDraftStorageKeys(id);
+        const sentAt = readStorageTimestamp(sentKey);
+        if (!sentAt || Date.now() - sentAt >= SENT_TEXT_GUARD_MS) return false;
+
+        if (!draftUpdatedAt || draftUpdatedAt <= sentAt) return true;
+
+        const sentText = localStorage.getItem(sentTextKey) || '';
+        const confirmedSentText = localStorage.getItem(confirmedSentTextKey) || '';
+        return Boolean(normalizedDraft && (normalizedDraft === sentText || normalizedDraft === confirmedSentText));
     }
 
     function getActiveTextarea() {
@@ -666,6 +618,10 @@
         const confirmedSentAt = readStorageTimestamp(confirmedSentAtKey);
         let shouldRestore = Boolean(normalizedDraft);
 
+        if (shouldRestore && isDraftRestoreBlockedAfterSend(id, normalizedDraft, draftUpdatedAt)) {
+            shouldRestore = false;
+        }
+
         if (shouldRestore && isGuardedSentText(id, normalizedDraft)) {
             shouldRestore = false;
         }
@@ -718,14 +674,15 @@
 
         const scope = textarea.closest('.detail-view') || textarea.closest('form') || document;
         const form = textarea.closest('form');
+        const resolveTextarea = () => getActiveTextarea() || textarea;
         const sendButtons = new Set(scope.querySelectorAll('button[aria-label="Send reply"], button[aria-label*="Send"]'));
         form?.querySelectorAll('button[type="submit"]').forEach(btn => sendButtons.add(btn));
 
         sendButtons.forEach(sendBtn => {
             if (sendBtn.id === 'send-btn' || sendBtn.classList.contains('etsy-ai-send-btn')) return;
             if (!sendBtn.dataset.draftCleanerAttached) {
-                sendBtn.addEventListener('pointerdown', () => rememberPendingSendText(textarea), true);
-                sendBtn.addEventListener('click', () => clearDraftAndMarkSent(textarea), true);
+                sendBtn.addEventListener('pointerdown', () => rememberPendingSendText(resolveTextarea()), true);
+                sendBtn.addEventListener('click', () => clearDraftAndMarkSent(resolveTextarea()), true);
                 sendBtn.dataset.draftCleanerAttached = 'true';
             }
         });
@@ -740,7 +697,7 @@
         }
 
         if (form && !form.dataset.draftSubmitCleanerAttached) {
-            form.addEventListener('submit', () => clearDraftAndMarkSent(textarea), true);
+            form.addEventListener('submit', () => clearDraftAndMarkSent(resolveTextarea()), true);
             form.dataset.draftSubmitCleanerAttached = 'true';
         }
 
@@ -1221,8 +1178,6 @@
     }
 
     function startMonitoring() {
-        installTextareaValueInterceptor();
-
         // Listen for storage changes to react instantly when interceptor saves chat history
         storageChangeListener = (changes, areaName) => {
             if (areaName === 'local' && changes.ETSY_CHAT_HISTORY) {

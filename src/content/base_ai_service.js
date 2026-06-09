@@ -465,8 +465,9 @@ ${markdown ? `\n\nPAGE CONTENT:\n${markdown}` : ''}`;
         const MAX_MESSAGE_CHARS = 2500;
         const messages = [];
 
-        // Always use global chat storage
-        const key = 'current_chat_messages';
+        const key = userId && String(userId).startsWith('current_chat_messages')
+            ? String(userId)
+            : 'current_chat_messages';
         try {
             const result = await chrome.storage.local.get([key]);
             const history = (result[key] || []).slice(-MAX_HISTORY_MESSAGES);
