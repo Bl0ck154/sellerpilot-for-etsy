@@ -532,3 +532,8 @@
 - [x] Для нового customer scope показувати `Chat with <customer>`, а для існуючого AI history — `Continuing chat with <customer>`.
 - [x] Bump source/build version to `1.6.17` for the separator hotfix.
 - [x] Syntax check, rebuild, commit і push.
+
+## Edge release
+- [x] Triggered GitHub Actions workflow `Microsoft Edge Add-ons Release` with `publish=true` for `1.6.17`.
+- [x] Run `27230973655` completed successfully in `1m16s`.
+- [x] Edge package upload, processing, draft publish, and publish processing all passed.
