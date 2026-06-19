@@ -110,7 +110,7 @@ AI: ${aiResponse}`;
      * Calls the OpenRouter Streaming API with automatic model fallback.
      * On 429/503 errors, automatically retries with the next model in OPENROUTER_FALLBACK_MODELS.
      */
-    async streamMessage({ modelId, apiKey, messages, systemInstruction, onChunk, onComplete, onError }) {
+    async streamMessage({ modelId, apiKey, messages, systemInstruction, onChunk, onComplete, onError, abortSignal }) {
         const resolvedKey = this._resolveApiKey(apiKey);
         const fallbackChain = this._buildFallbackChain(modelId);
         let lastError = null;
@@ -131,7 +131,8 @@ AI: ${aiResponse}`;
                     systemInstruction,
                     onChunk,
                     onComplete,
-                    onError: isRetry ? null : onError
+                    onError: isRetry ? null : onError,
+                    abortSignal
                 });
             } catch (error) {
                 lastError = error;
@@ -170,7 +171,7 @@ AI: ${aiResponse}`;
     /**
      * Internal streaming implementation (single model attempt).
      */
-    async _streamMessageInternal({ modelId, apiKey, messages, systemInstruction, onChunk, onComplete }) {
+    async _streamMessageInternal({ modelId, apiKey, messages, systemInstruction, onChunk, onComplete, abortSignal }) {
         const url = `${this.getApiEndpoint()}chat/completions`;
 
         const messagesWithSystem = [
@@ -186,7 +187,8 @@ AI: ${aiResponse}`;
                 "HTTP-Referer": this._getReferer(),
                 "X-Title": "Etsy AI Assistant"
             },
-            body: JSON.stringify({ model: modelId, messages: messagesWithSystem, stream: true })
+            body: JSON.stringify({ model: modelId, messages: messagesWithSystem, stream: true }),
+            signal: abortSignal || undefined
         });
 
         if (!response.ok) {

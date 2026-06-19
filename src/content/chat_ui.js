@@ -416,7 +416,37 @@ function initChat() {
     let activeAiScopeKey = null;
     let contextTransitionId = 0;
     let viewingLegacySession = false;
-    const DEFAULT_SUGGEST_RESPONSE_PROMPT = "Draft a cautious customer reply based on the current Etsy conversation and page context. Write the draft in the customer's conversation language, not necessarily the Owner's language. Do not mirror, list, or restate the customer's specific wording or requested edits; answer directly and keep it concise. If I give a broad confirmation like we can do all of that, keep the draft broad too and do not pull details from the customer's message. If the Owner asks to include a greeting, include it; otherwise use a greeting only for a new conversation. Do not accept custom work, promise timing, or promise an exact result unless I explicitly approved it. If I explicitly say to tell the customer yes or that we can do it, treat that as approval and output only the requested confirmation without extra questions, conditions, review language, or next steps. If the page or chat already shows attachments, or the customer says the pictures were sent, never ask for those photos again. When no confirmed order is visible, never request photos, files, or production assets unless I explicitly ask you to request them. If the request sounds risky or unrealistic, only add caution when confirming it would create a specific unsupported promise about exact results, timing, price, or policy.";
+    let pendingMemorySuggestion = null;
+    let isAnalyzingMemoryIntent = false;
+    const MEMORY_ANALYSIS_TIMEOUT_MS = 3000;
+    const MEMORY_ANALYSIS_SYSTEM_PROMPT = `You classify whether the Owner is asking to use persistent assistant memory.
+Return ONLY compact JSON with this shape:
+{"action":"none|add|remove|clear|offer","text":"","keyword":"","confidence":0}
+
+Meanings:
+- add: the Owner clearly asks to save/remember a durable fact, shop policy, writing preference, workflow preference, or voice rule.
+- remove: the Owner clearly asks to forget/remove a memory.
+- clear: the Owner clearly asks to clear all memory.
+- offer: the Owner mentions a durable preference/policy that would be useful later, but does not clearly ask to save it. Ask for confirmation instead of saving automatically.
+- none: normal drafting/chat request, temporary instruction, one-off customer detail, or ambiguous.
+
+Rules:
+- Do not save one-off customer/order details as memory.
+- Do not save sensitive private data.
+- Prefer none when unsure.
+- For add/offer, put the memory-ready fact in text, written as a stable preference/policy.
+- For remove, put the smallest useful search phrase in keyword.`;
+    const MEMORY_DECISION_SYSTEM_PROMPT = `You classify the Owner's reply to a pending memory confirmation.
+Return ONLY compact JSON with this shape:
+{"decision":"accept|reject|unclear","confidence":0}
+
+The Owner was asked whether to save, replace, remove, or clear persistent memory.
+Classify the Owner's latest message by meaning, not by exact words.
+- accept: they agree, approve, confirm, or ask to proceed.
+- reject: they decline, cancel, say not to do it, or ask to keep memory unchanged.
+- unclear: anything else, including a new unrelated request or a question.
+Prefer unclear when unsure.`;
+    const DEFAULT_SUGGEST_RESPONSE_PROMPT = "Draft a customer reply based on the current Etsy conversation and page context. Write in the customer's language. Preserve my intended meaning and point of view: if I write as one person, draft as one person; if I write as a team/shop, draft as a team/shop. Use context to understand the situation, but do not add new facts, claims, next steps, or reassurance I did not ask for. Keep broad confirmations broad; be specific only when useful for the reply I requested. Never ask for photos/details already provided. Avoid unsupported promises about exact results, timing, price, refunds, or outcomes. If I ask for a beautiful, polite, warm, or more detailed reply, make it naturally fuller instead of overly short.";
     const QUICK_ACTIONS = [
         {
             id: 'suggest-reply',
@@ -1446,7 +1476,7 @@ function initChat() {
         if (disabled) closeQuickActionsMenu();
     }
 
-    function sendMessage() {
+    async function sendMessage() {
         const text = ELEMENTS.userInput.innerText.trim();
         if (!text) return;
 
@@ -1456,19 +1486,39 @@ function initChat() {
         }
 
         // Don't send if already processing
-        if (isProcessing) {
+        if (isProcessing || isAnalyzingMemoryIntent) {
             return; // Keep text in input, don't clear
         }
 
-        // Memory commands ("запам'ятай…", "забудь…") are handled locally — no AI call.
-        if (window.MemoryManager) {
-            const cmd = window.MemoryManager.detectCommand(text);
-            if (cmd) {
+        if (pendingMemorySuggestion) {
+            let pendingMemoryDecision = null;
+            isAnalyzingMemoryIntent = true;
+            try {
+                pendingMemoryDecision = await analyzePendingMemoryDecision(text);
+            } finally {
+                isAnalyzingMemoryIntent = false;
+            }
+            if (pendingMemoryDecision?.decision === 'accept' || pendingMemoryDecision?.decision === 'reject') {
                 ELEMENTS.userInput.innerText = "";
-                handleMemoryCommand(text, cmd).catch(err => {
-                    console.error('MemoryManager error:', err);
-                    renderMessage(`❌ Memory error: ${err.message || err}`, "system");
+                handlePendingMemoryDecision(text, { accept: pendingMemoryDecision.decision === 'accept' }).catch(err => {
+                    console.error('Memory decision error:', err);
+                    renderMessage(`❌ Memory error: ${err.message || err}`, "system compact");
                 });
+                return;
+            }
+        }
+
+        let memoryIntent = null;
+        isAnalyzingMemoryIntent = true;
+        try {
+            memoryIntent = await analyzeMemoryIntentIfUseful(text);
+        } finally {
+            isAnalyzingMemoryIntent = false;
+        }
+        if (memoryIntent?.action && memoryIntent.action !== 'none') {
+            const handled = await handleMemoryIntent(text, memoryIntent);
+            if (handled) {
+                ELEMENTS.userInput.innerText = "";
                 return;
             }
         }
@@ -1476,36 +1526,235 @@ function initChat() {
         handleChatInteraction(text);
     }
 
-    async function handleMemoryCommand(originalText, cmd) {
+    function shouldAnalyzeMemoryIntent(text) {
+        if (!window.MemoryManager || !text) return false;
+        const normalized = String(text).toLowerCase();
+        if (normalized.length < 8) return false;
+        return true;
+    }
+
+    async function analyzeMemoryIntentIfUseful(text) {
+        if (!shouldAnalyzeMemoryIntent(text)) return null;
+
+        try {
+            const selectedOption = ELEMENTS.modelSelect.options[ELEMENTS.modelSelect.selectedIndex];
+            const provider = selectedOption ? selectedOption.dataset.provider : 'gemini';
+            let providerApiKey = null;
+            if (!PROVIDERS_WITH_BUILTIN_KEY.has(provider)) {
+                providerApiKey = await window.AIServiceFactory.getApiKey(provider);
+                if (!providerApiKey) return null;
+            }
+
+            const service = await window.AIServiceFactory.getCurrentService(provider);
+            const providerModelId = await window.AIServiceFactory.getModelId(provider);
+            let raw = '';
+            const controller = new AbortController();
+            let timeoutId = null;
+            const classificationPromise = service.streamMessage({
+                modelId: providerModelId,
+                apiKey: providerApiKey,
+                systemInstruction: MEMORY_ANALYSIS_SYSTEM_PROMPT,
+                messages: [{ role: 'user', content: text }],
+                onChunk: (_chunk, fullText) => { raw = fullText || raw; },
+                onComplete: (fullText) => { raw = fullText || raw; },
+                onError: () => { },
+                abortSignal: controller.signal
+            });
+
+            try {
+                await Promise.race([
+                    classificationPromise,
+                    new Promise((_, reject) => {
+                        timeoutId = setTimeout(() => {
+                            controller.abort();
+                            reject(new Error('memory analysis timeout'));
+                        }, MEMORY_ANALYSIS_TIMEOUT_MS);
+                    })
+                ]);
+            } finally {
+                if (timeoutId) clearTimeout(timeoutId);
+            }
+
+            return parseMemoryIntentJson(raw);
+        } catch (error) {
+            console.debug('Memory intent analysis skipped:', error?.message || error);
+            return null;
+        }
+    }
+
+    async function analyzePendingMemoryDecision(text) {
+        if (!pendingMemorySuggestion || !text || !window.MemoryManager) return null;
+
+        try {
+            const selectedOption = ELEMENTS.modelSelect.options[ELEMENTS.modelSelect.selectedIndex];
+            const provider = selectedOption ? selectedOption.dataset.provider : 'gemini';
+            let providerApiKey = null;
+            if (!PROVIDERS_WITH_BUILTIN_KEY.has(provider)) {
+                providerApiKey = await window.AIServiceFactory.getApiKey(provider);
+                if (!providerApiKey) return null;
+            }
+
+            const service = await window.AIServiceFactory.getCurrentService(provider);
+            const providerModelId = await window.AIServiceFactory.getModelId(provider);
+            let raw = '';
+            const controller = new AbortController();
+            let timeoutId = null;
+            const pendingSummary = JSON.stringify({
+                pending: pendingMemorySuggestion,
+                ownerReply: text
+            });
+
+            const classificationPromise = service.streamMessage({
+                modelId: providerModelId,
+                apiKey: providerApiKey,
+                systemInstruction: MEMORY_DECISION_SYSTEM_PROMPT,
+                messages: [{ role: 'user', content: pendingSummary }],
+                onChunk: (_chunk, fullText) => { raw = fullText || raw; },
+                onComplete: (fullText) => { raw = fullText || raw; },
+                onError: () => { },
+                abortSignal: controller.signal
+            });
+
+            try {
+                await Promise.race([
+                    classificationPromise,
+                    new Promise((_, reject) => {
+                        timeoutId = setTimeout(() => {
+                            controller.abort();
+                            reject(new Error('memory decision timeout'));
+                        }, MEMORY_ANALYSIS_TIMEOUT_MS);
+                    })
+                ]);
+            } finally {
+                if (timeoutId) clearTimeout(timeoutId);
+            }
+
+            return parseMemoryDecisionJson(raw);
+        } catch (error) {
+            console.debug('Memory decision analysis skipped:', error?.message || error);
+            return null;
+        }
+    }
+
+    function parseMemoryIntentJson(raw) {
+        if (!raw) return null;
+        const text = String(raw).replace(/```json|```/gi, '').trim();
+        const match = text.match(/\{[\s\S]*\}/);
+        if (!match) return null;
+        try {
+            const parsed = JSON.parse(match[0]);
+            const action = String(parsed.action || 'none').toLowerCase();
+            if (!['none', 'add', 'remove', 'clear', 'offer'].includes(action)) return null;
+            return {
+                action,
+                text: String(parsed.text || '').trim().slice(0, 500),
+                keyword: String(parsed.keyword || '').trim().slice(0, 120),
+                confidence: Number(parsed.confidence) || 0
+            };
+        } catch (_) {
+            return null;
+        }
+    }
+
+    function parseMemoryDecisionJson(raw) {
+        if (!raw) return null;
+        const text = String(raw).replace(/```json|```/gi, '').trim();
+        const match = text.match(/\{[\s\S]*\}/);
+        if (!match) return null;
+        try {
+            const parsed = JSON.parse(match[0]);
+            const decision = String(parsed.decision || 'unclear').toLowerCase();
+            if (!['accept', 'reject', 'unclear'].includes(decision)) return null;
+            return {
+                decision: (Number(parsed.confidence) || 0) >= 0.55 ? decision : 'unclear',
+                confidence: Number(parsed.confidence) || 0
+            };
+        } catch (_) {
+            return null;
+        }
+    }
+
+    async function handleMemoryIntent(originalText, intent) {
+        if (!window.MemoryManager || !intent || intent.action === 'none') return false;
+
+        if (intent.action === 'offer') {
+            if (!intent.text || intent.confidence < 0.55) return false;
+            pendingMemorySuggestion = { text: intent.text, source: 'offer' };
+            addMessage(`Remember this for future replies? "${intent.text}"\nReply with your choice.`, "system compact");
+            return false;
+        }
+
         await clearTransientSystemMessagesBeforeRealChat();
         addMessage(originalText, "user");
-        await saveChatToStorage(originalText, "user");
 
         let reply = '';
         try {
-            if (cmd.action === 'add') {
-                const res = await window.MemoryManager.add(cmd.text);
+            if (intent.action === 'add') {
+                const res = await window.MemoryManager.addSmart(intent.text);
                 if (!res) reply = "⚠️ Could not save an empty memory.";
                 else if (res.duplicate) reply = `ℹ️ Already remembered: "${res.entry.text}"`;
+                else if (res.conflict) {
+                    pendingMemorySuggestion = { text: res.text, conflicts: res.conflicts, source: 'explicit_add' };
+                    reply = `This may conflict with existing memory:\n${formatMemoryEntries(res.conflicts)}\n\nSave it and replace the older conflicting memory? Reply with your choice.`;
+                }
+                else if (res.replaced?.length) reply = `💾 Remembered and replaced older memory: "${res.entry.text}"`;
                 else reply = `💾 Remembered: "${res.entry.text}"`;
-            } else if (cmd.action === 'remove') {
-                const res = await window.MemoryManager.removeByKeyword(cmd.keyword);
+            } else if (intent.action === 'remove') {
+                const res = await window.MemoryManager.removeByKeyword(intent.keyword || intent.text);
                 if (res.removed === 0) {
-                    reply = `🤔 I could not find any memory about "${cmd.keyword}".`;
+                    if (res.ambiguous) {
+                        pendingMemorySuggestion = { removeKeyword: intent.keyword || intent.text, matches: res.entries, source: 'remove_ambiguous' };
+                        reply = `I found several matching memory entries:\n${formatMemoryEntries(res.entries)}\n\nRemove all of them? Reply with your choice.`;
+                    } else {
+                        reply = `🤔 I could not find a matching memory.`;
+                    }
                 } else {
                     const preview = res.entries.map(e => `• ${e.text}`).join('\n');
                     reply = `🗑️ Removed (${res.removed}):\n${preview}`;
                 }
-            } else if (cmd.action === 'clear') {
-                await window.MemoryManager.clear();
-                reply = "🗑️ All memory cleared.";
+            } else if (intent.action === 'clear') {
+                pendingMemorySuggestion = { source: 'clear_all' };
+                reply = 'Clear all memory? Reply with your choice.';
             }
         } catch (e) {
             reply = `❌ Memory error: ${e.message || e}`;
         }
 
-        addMessage(reply, "system");
-        await saveChatToStorage(reply, "system");
+        addMessage(reply, "system compact");
+        return true;
+    }
+
+    function formatMemoryEntries(entries = []) {
+        return entries.map((entry, index) => `${index + 1}. ${entry.text}`).join('\n');
+    }
+
+    async function handlePendingMemoryDecision(originalText, decision) {
+        const pending = pendingMemorySuggestion;
+        pendingMemorySuggestion = null;
+
+        await clearTransientSystemMessagesBeforeRealChat();
+
+        let reply = '';
+        if (!decision.accept) {
+            reply = 'Memory unchanged.';
+        } else if (pending?.source === 'remove_ambiguous') {
+            const res = await window.MemoryManager.removeByKeyword(pending.removeKeyword, { allowMultiple: true });
+            reply = res.removed ? `🗑️ Removed (${res.removed}) memory entries.` : 'Memory unchanged.';
+        } else if (pending?.source === 'clear_all') {
+            await window.MemoryManager.clear();
+            reply = '🗑️ All memory cleared.';
+        } else if (pending?.text) {
+            const res = await window.MemoryManager.addSmart(pending.text, { replaceConflicts: true });
+            if (res?.entry) {
+                reply = res.replaced?.length
+                    ? `💾 Remembered and replaced ${res.replaced.length} older conflicting memory entry.`
+                    : `💾 Remembered: "${res.entry.text}"`;
+            } else {
+                reply = 'Memory unchanged.';
+            }
+        }
+
+        addMessage(reply, "system compact");
     }
 
     // --- UTILS ---
@@ -1815,18 +2064,14 @@ function initChat() {
         if (!text || !String(pageScope).startsWith('messages')) return null;
 
         const fallbackPhrases = [
-            'Yes, we can do that',
-            'No problem',
-            'Absolutely',
-            'for sure',
-            'definitely',
             'guarantee',
             'we can make anything',
             'exactly as you want',
-            "I'll get started right away",
             'we will fix everything',
             'we can recreate it exactly',
-            'turn out perfectly'
+            'turn out perfectly',
+            'unlimited revisions',
+            'I promise'
         ];
 
         const phrases = window.AgentPolicyManager

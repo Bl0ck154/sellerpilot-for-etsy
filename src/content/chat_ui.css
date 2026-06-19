@@ -303,6 +303,31 @@
     width: 90%;
 }
 
+.etsy-ai-msg.system {
+    align-self: center;
+    max-width: 92%;
+    background: #EEF2FF;
+    color: #374151;
+    border: 1px solid #E0E7FF;
+    font-size: 12px;
+}
+
+.etsy-ai-msg.system.compact {
+    padding: 4px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    line-height: 1.25;
+    color: #6B7280;
+    background: transparent;
+    border: 1px solid #E5E7EB;
+    max-width: 94%;
+    white-space: pre-wrap;
+}
+
+.etsy-ai-msg.system.compact .etsy-ai-timestamp {
+    display: none;
+}
+
 \r \r
 
 /* Error messages with retry button */

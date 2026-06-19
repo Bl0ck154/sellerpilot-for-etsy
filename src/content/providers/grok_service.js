@@ -80,7 +80,7 @@ AI: ${aiResponse}`;
      * @param {Function} [params.onError] - Callback for errors.
      * @returns {Promise<string>} The complete generated text.
      */
-    async streamMessage({ modelId, apiKey, messages, systemInstruction, onChunk, onComplete, onError }) {
+    async streamMessage({ modelId, apiKey, messages, systemInstruction, onChunk, onComplete, onError, abortSignal }) {
         const url = `${this.getApiEndpoint()}chat/completions`;
 
         // Add system instruction as first message
@@ -102,7 +102,8 @@ AI: ${aiResponse}`;
                     "Content-Type": "application/json",
                     "Authorization": `Bearer ${apiKey}`
                 },
-                body: JSON.stringify(payload)
+                body: JSON.stringify(payload),
+                signal: abortSignal || undefined
             });
 
             if (!response.ok) {

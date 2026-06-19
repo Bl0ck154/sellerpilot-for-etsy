@@ -320,10 +320,16 @@ async function deleteMemory(id) {
 async function addMemoryFromInput() {
     const text = memoryNewInput.value.trim();
     if (!text) return;
-    const res = await window.MemoryManager.add(text);
+    let res = await window.MemoryManager.addSmart(text);
     if (!res) return;
+    if (res.conflict) {
+        const preview = res.conflicts.map((entry, index) => `${index + 1}. ${entry.text}`).join('\n');
+        const replace = confirm(`This may conflict with existing memory:\n\n${preview}\n\nSave it and replace the older conflicting memory?`);
+        if (!replace) return;
+        res = await window.MemoryManager.addSmart(text, { replaceConflicts: true });
+    }
     memoryNewInput.value = '';
-    showStatus(res.duplicate ? 'Already remembered' : 'Memory added');
+    showStatus(res.duplicate ? 'Already remembered' : (res.replaced?.length ? 'Memory added; older conflict replaced' : 'Memory added'));
     renderMemoryList();
 }
 
