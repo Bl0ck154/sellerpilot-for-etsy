@@ -537,3 +537,22 @@
 - [x] Triggered GitHub Actions workflow `Microsoft Edge Add-ons Release` with `publish=true` for `1.6.17`.
 - [x] Run `27230973655` completed successfully in `1m16s`.
 - [x] Edge package upload, processing, draft publish, and publish processing all passed.
+
+---
+
+# Фаза 47 — Smarter persistent memory handling (2026-06-19)
+
+## План
+- [x] Replace regex-based memory commands with LLM-based memory intent classification.
+- [x] Replace regex yes/no pending confirmation handling with LLM-based decision classification.
+- [x] Add newest-first memory context, newer-entry priority, duplicate refresh, conflict detection, and safer ambiguous removal confirmation.
+- [x] Show compact system notifications for memory save/remove/clear results.
+- [x] Update prompt/policy so the assistant knows persistent memory exists and preserves Owner intent/point of view more accurately.
+- [x] Add abort-signal support for memory classifier calls in DeepSeek, Grok, and OpenRouter providers.
+- [x] Bump source/build version to `1.6.18`.
+- [x] Syntax checks and `cmd /c build.bat` passed; `dist/chrome/manifest.json` version verified as `1.6.18`.
+
+## Edge release
+- [x] Triggered GitHub Actions workflow `Microsoft Edge Add-ons Release` with `publish=true` for `1.6.18`.
+- [x] Run `27822395418` completed successfully in `1m7s`.
+- [x] Edge package upload, processing, draft publish, and publish processing all passed.
