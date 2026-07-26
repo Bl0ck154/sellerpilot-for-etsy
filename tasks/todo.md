@@ -556,3 +556,25 @@
 - [x] Triggered GitHub Actions workflow `Microsoft Edge Add-ons Release` with `publish=true` for `1.6.18`.
 - [x] Run `27822395418` completed successfully in `1m7s`.
 - [x] Edge package upload, processing, draft publish, and publish processing all passed.
+
+---
+
+# Фаза 48 — Editable quick replies and Edge release 1.6.19 (2026-07-26)
+
+## План
+- [x] Додати локально збережені quick reply templates зі стартовими безпечними відповідями.
+- [x] Показувати швидкий доступ безпосередньо над Etsy message textarea.
+- [x] Вставляти шаблон тільки в чернетку без автоматичного Send.
+- [x] Додати коротку 450 ms анімацію «перельоту» від кнопки шаблону до textarea.
+- [x] Додати ручне керування в Settings: add, edit, delete, clear і live storage sync.
+- [x] Додати agent-managed commands для list/add/update/remove quick replies.
+- [x] Виправити stale `v1.0` у Settings footer і неточні development/build інструкції README.
+- [x] Unit та browser-integration harness пройшли; Send counter лишається `0` після вставлення.
+- [x] Підняти source/build version до `1.6.19`; перевірити `dist/chrome/manifest.json`.
+- [x] Release commit `4e21ad5` запушено в `main`.
+
+## Edge release
+- [x] Перший run `30204870798` зібрав artifact, але upload отримав HTTP `401` через неактуальний Actions secret; publish не запускався.
+- [x] Після оновлення secret повторно запущено `Microsoft Edge Add-ons Release` з `publish=true`.
+- [x] Run `30207836321` completed successfully in `1m0s`.
+- [x] Edge package upload, processing, draft publish, and publish processing all passed.
