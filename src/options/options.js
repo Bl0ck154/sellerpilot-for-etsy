@@ -9,6 +9,11 @@ const customInstructionsTextarea = document.getElementById('customInstructions')
 const chatManagerToggle = document.getElementById('chatManagerToggle');
 const statusElement = document.getElementById('status');
 const statusText = statusElement.querySelector('.status-text');
+const extensionVersion = document.getElementById('extensionVersion');
+
+if (extensionVersion) {
+    extensionVersion.textContent = chrome.runtime.getManifest().version;
+}
 
 // Debounce helper
 function debounce(func, wait) {
@@ -213,6 +218,150 @@ const debouncedSaveInstructions = debounce(saveCustomInstructions, 1000);
 customInstructionsTextarea.addEventListener('input', debouncedSaveInstructions);
 
 // =====================
+// Quick Replies section
+// =====================
+const quickReplyListEl = document.getElementById('quickReplyList');
+const quickReplyLabelInput = document.getElementById('quickReplyLabelInput');
+const quickReplyTextInput = document.getElementById('quickReplyTextInput');
+const quickReplyAddBtn = document.getElementById('quickReplyAddBtn');
+const quickReplyClearBtn = document.getElementById('quickReplyClearBtn');
+let editingQuickReplyId = null;
+
+function resetQuickReplyEditor() {
+    editingQuickReplyId = null;
+    quickReplyLabelInput.value = '';
+    quickReplyTextInput.value = '';
+    quickReplyAddBtn.textContent = '➕ Add quick reply';
+}
+
+function startEditQuickReply(entry) {
+    editingQuickReplyId = entry.id;
+    quickReplyLabelInput.value = entry.label;
+    quickReplyTextInput.value = entry.text;
+    quickReplyAddBtn.textContent = '💾 Save quick reply';
+    quickReplyLabelInput.focus();
+    quickReplyLabelInput.select();
+}
+
+async function renderQuickReplyList() {
+    if (!window.QuickReplyManager) {
+        quickReplyListEl.innerHTML = '<li class="memory-empty">Quick reply module not loaded.</li>';
+        return;
+    }
+
+    const entries = await window.QuickReplyManager.list();
+    quickReplyListEl.innerHTML = '';
+    if (!entries.length) {
+        quickReplyListEl.innerHTML = '<li class="memory-empty">No quick replies yet.</li>';
+        return;
+    }
+
+    for (const entry of entries) {
+        const li = document.createElement('li');
+        li.className = 'memory-item';
+        li.dataset.id = entry.id;
+
+        const content = document.createElement('div');
+        content.className = 'quick-reply-content';
+
+        const label = document.createElement('span');
+        label.className = 'quick-reply-label';
+        label.textContent = entry.label;
+
+        const preview = document.createElement('div');
+        preview.className = 'quick-reply-preview';
+        preview.textContent = entry.text;
+        preview.title = entry.text;
+        content.append(label, preview);
+
+        const actions = document.createElement('div');
+        actions.className = 'memory-item-actions';
+
+        const editBtn = document.createElement('button');
+        editBtn.type = 'button';
+        editBtn.className = 'memory-icon-btn';
+        editBtn.title = `Edit ${entry.label}`;
+        editBtn.setAttribute('aria-label', `Edit ${entry.label}`);
+        editBtn.textContent = '✏️';
+        editBtn.addEventListener('click', () => startEditQuickReply(entry));
+
+        const deleteBtn = document.createElement('button');
+        deleteBtn.type = 'button';
+        deleteBtn.className = 'memory-icon-btn';
+        deleteBtn.title = `Delete ${entry.label}`;
+        deleteBtn.setAttribute('aria-label', `Delete ${entry.label}`);
+        deleteBtn.textContent = '🗑️';
+        deleteBtn.addEventListener('click', async () => {
+            await window.QuickReplyManager.removeById(entry.id);
+            if (editingQuickReplyId === entry.id) resetQuickReplyEditor();
+            showStatus('Quick reply deleted');
+            renderQuickReplyList();
+        });
+
+        actions.append(editBtn, deleteBtn);
+        li.append(content, actions);
+        quickReplyListEl.appendChild(li);
+    }
+}
+
+async function saveQuickReplyFromEditor() {
+    const label = quickReplyLabelInput.value.trim();
+    const text = quickReplyTextInput.value.trim();
+    if (!label || !text) {
+        showStatus('Add both a label and reply text');
+        (!label ? quickReplyLabelInput : quickReplyTextInput).focus();
+        return;
+    }
+
+    const result = editingQuickReplyId
+        ? await window.QuickReplyManager.update(editingQuickReplyId, { label, text })
+        : await window.QuickReplyManager.add(label, text);
+
+    if (result?.duplicate) {
+        showStatus(`A quick reply named "${result.entry.label}" already exists`);
+        return;
+    }
+    if (result?.limitReached) {
+        showStatus(`Maximum ${result.maxEntries} quick replies reached`);
+        return;
+    }
+    if (!result?.entry) {
+        showStatus('Could not save quick reply');
+        return;
+    }
+
+    const message = editingQuickReplyId ? 'Quick reply updated' : 'Quick reply added';
+    resetQuickReplyEditor();
+    showStatus(message);
+    renderQuickReplyList();
+}
+
+async function clearQuickReplies() {
+    if (!confirm('Clear ALL quick replies? This cannot be undone.')) return;
+    await window.QuickReplyManager.clear();
+    resetQuickReplyEditor();
+    showStatus('Quick replies cleared');
+    renderQuickReplyList();
+}
+
+quickReplyAddBtn?.addEventListener('click', saveQuickReplyFromEditor);
+quickReplyClearBtn?.addEventListener('click', clearQuickReplies);
+quickReplyLabelInput?.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+        event.preventDefault();
+        quickReplyTextInput.focus();
+    }
+    if (event.key === 'Escape') resetQuickReplyEditor();
+});
+quickReplyTextInput?.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+        event.preventDefault();
+        saveQuickReplyFromEditor();
+    }
+    if (event.key === 'Escape') resetQuickReplyEditor();
+});
+
+// =====================
 // Agent Memory section
 // =====================
 const memoryListEl = document.getElementById('memoryList');
@@ -354,9 +503,13 @@ if (chrome?.storage?.onChanged) {
         if (namespace === 'local' && window.MemoryManager && changes[window.MemoryManager.STORAGE_KEY]) {
             renderMemoryList();
         }
+        if (namespace === 'local' && window.QuickReplyManager && changes[window.QuickReplyManager.STORAGE_KEY]) {
+            renderQuickReplyList();
+        }
     });
 }
 
 // Initial load
 loadSettings();
+renderQuickReplyList();
 renderMemoryList();

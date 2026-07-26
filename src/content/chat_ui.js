@@ -418,6 +418,7 @@ function initChat() {
     let viewingLegacySession = false;
     let pendingMemorySuggestion = null;
     let isAnalyzingMemoryIntent = false;
+    let isAnalyzingQuickReplyIntent = false;
     const MEMORY_ANALYSIS_TIMEOUT_MS = 3000;
     const MEMORY_ANALYSIS_SYSTEM_PROMPT = `You classify whether the Owner is asking to use persistent assistant memory.
 Return ONLY compact JSON with this shape:
@@ -446,6 +447,22 @@ Classify the Owner's latest message by meaning, not by exact words.
 - reject: they decline, cancel, say not to do it, or ask to keep memory unchanged.
 - unclear: anything else, including a new unrelated request or a question.
 Prefer unclear when unsure.`;
+    const QUICK_REPLY_ANALYSIS_SYSTEM_PROMPT = `You classify whether the Owner is asking to manage reusable Etsy quick replies.
+Return ONLY compact JSON with this shape:
+{"action":"none|list|add|update|remove","target":"","label":"","text":"","confidence":0}
+
+Meanings:
+- list: show the saved quick replies.
+- add: create a new quick reply. Put its short human-readable name in label and complete customer-facing reply in text.
+- update: edit or rename an existing quick reply. Put its current name/search phrase in target, its new name in label only if requested, and its complete new reply in text only if requested.
+- remove: delete one quick reply. Put its name/search phrase in target.
+- none: normal customer-reply drafting, translation, rewriting, chat, or anything not explicitly about managing saved quick replies.
+
+Rules:
+- A request to draft, suggest, write, improve, or translate a reply is NOT quick-reply management unless the Owner explicitly says to save/add/update/remove a reusable quick reply or template.
+- Never infer missing reply text for add/update.
+- Preserve the requested customer-facing language and wording.
+- Prefer none when unsure.`;
     const DEFAULT_SUGGEST_RESPONSE_PROMPT = "Draft a customer reply based on the current Etsy conversation and page context. Write in the customer's language. Preserve my intended meaning and point of view: if I write as one person, draft as one person; if I write as a team/shop, draft as a team/shop. Use context to understand the situation, but do not add new facts, claims, next steps, or reassurance I did not ask for. Keep broad confirmations broad; be specific only when useful for the reply I requested. Never ask for photos/details already provided. Avoid unsupported promises about exact results, timing, price, refunds, or outcomes. If I ask for a beautiful, polite, warm, or more detailed reply, make it naturally fuller instead of overly short.";
     const QUICK_ACTIONS = [
         {
@@ -1486,8 +1503,23 @@ Prefer unclear when unsure.`;
         }
 
         // Don't send if already processing
-        if (isProcessing || isAnalyzingMemoryIntent) {
+        if (isProcessing || isAnalyzingMemoryIntent || isAnalyzingQuickReplyIntent) {
             return; // Keep text in input, don't clear
+        }
+
+        let quickReplyIntent = null;
+        isAnalyzingQuickReplyIntent = true;
+        try {
+            quickReplyIntent = await analyzeQuickReplyIntentIfUseful(text);
+        } finally {
+            isAnalyzingQuickReplyIntent = false;
+        }
+        if (quickReplyIntent?.action && quickReplyIntent.action !== 'none') {
+            const handled = await handleQuickReplyIntent(text, quickReplyIntent);
+            if (handled) {
+                ELEMENTS.userInput.innerText = "";
+                return;
+            }
         }
 
         if (pendingMemorySuggestion) {
@@ -1524,6 +1556,146 @@ Prefer unclear when unsure.`;
         }
 
         handleChatInteraction(text);
+    }
+
+    function shouldAnalyzeQuickReplyIntent(text) {
+        if (!window.QuickReplyManager || !text) return false;
+        return /\bquick\s*repl(?:y|ies)\b|\bcanned\s*(?:reply|response)\b|\breply\s*template\b|\btemplate\s*(?:reply|response)\b|швидк[\p{L}\p{N}_]*\s+відповід[\p{L}\p{N}_]*|шаблон[\p{L}\p{N}_]*\s+(?:відповід[\p{L}\p{N}_]*|повідомлен[\p{L}\p{N}_]*)|быстр[\p{L}\p{N}_]*\s+ответ[\p{L}\p{N}_]*|шаблон[\p{L}\p{N}_]*\s+(?:ответ[\p{L}\p{N}_]*|сообщен[\p{L}\p{N}_]*)/iu.test(text);
+    }
+
+    async function analyzeQuickReplyIntentIfUseful(text) {
+        if (!shouldAnalyzeQuickReplyIntent(text)) return null;
+
+        try {
+            const selectedOption = ELEMENTS.modelSelect.options[ELEMENTS.modelSelect.selectedIndex];
+            const provider = selectedOption ? selectedOption.dataset.provider : 'gemini';
+            let providerApiKey = null;
+            if (!PROVIDERS_WITH_BUILTIN_KEY.has(provider)) {
+                providerApiKey = await window.AIServiceFactory.getApiKey(provider);
+                if (!providerApiKey) return null;
+            }
+
+            const service = await window.AIServiceFactory.getCurrentService(provider);
+            const providerModelId = await window.AIServiceFactory.getModelId(provider);
+            let raw = '';
+            const controller = new AbortController();
+            let timeoutId = null;
+            const classificationPromise = service.streamMessage({
+                modelId: providerModelId,
+                apiKey: providerApiKey,
+                systemInstruction: QUICK_REPLY_ANALYSIS_SYSTEM_PROMPT,
+                messages: [{ role: 'user', content: text }],
+                onChunk: (_chunk, fullText) => { raw = fullText || raw; },
+                onComplete: (fullText) => { raw = fullText || raw; },
+                onError: () => { },
+                abortSignal: controller.signal
+            });
+
+            try {
+                await Promise.race([
+                    classificationPromise,
+                    new Promise((_, reject) => {
+                        timeoutId = setTimeout(() => {
+                            controller.abort();
+                            reject(new Error('quick reply analysis timeout'));
+                        }, MEMORY_ANALYSIS_TIMEOUT_MS);
+                    })
+                ]);
+            } finally {
+                if (timeoutId) clearTimeout(timeoutId);
+            }
+
+            return parseQuickReplyIntentJson(raw);
+        } catch (error) {
+            console.debug('Quick reply intent analysis skipped:', error?.message || error);
+            return null;
+        }
+    }
+
+    function parseQuickReplyIntentJson(raw) {
+        if (!raw) return null;
+        const text = String(raw).replace(/```json|```/gi, '').trim();
+        const match = text.match(/\{[\s\S]*\}/);
+        if (!match) return null;
+        try {
+            const parsed = JSON.parse(match[0]);
+            const action = String(parsed.action || 'none').toLowerCase();
+            const confidence = Number(parsed.confidence) || 0;
+            if (!['none', 'list', 'add', 'update', 'remove'].includes(action)) return null;
+            return {
+                action: confidence >= 0.6 ? action : 'none',
+                target: String(parsed.target || '').trim().slice(0, 120),
+                label: String(parsed.label || '').trim().slice(0, 48),
+                text: String(parsed.text || '').trim().slice(0, 1500),
+                confidence
+            };
+        } catch (_) {
+            return null;
+        }
+    }
+
+    function formatQuickReplyEntries(entries) {
+        return (entries || []).map(entry => `• ${entry.label}: ${entry.text}`).join('\n');
+    }
+
+    async function handleQuickReplyIntent(originalText, intent) {
+        if (!window.QuickReplyManager || !intent || intent.action === 'none') return false;
+
+        if (intent.action === 'add' && (!intent.label || !intent.text)) return false;
+        if (intent.action === 'update' && (!intent.target || (!intent.label && !intent.text))) return false;
+        if (intent.action === 'remove' && !intent.target) return false;
+
+        await clearTransientSystemMessagesBeforeRealChat();
+        addMessage(originalText, "user");
+
+        let reply = '';
+        try {
+            if (intent.action === 'list') {
+                const entries = await window.QuickReplyManager.list();
+                reply = entries.length
+                    ? `⚡ Saved quick replies:\n${formatQuickReplyEntries(entries)}`
+                    : '⚡ No quick replies saved yet.';
+            } else if (intent.action === 'add') {
+                const result = await window.QuickReplyManager.add(intent.label, intent.text);
+                if (result?.duplicate) {
+                    reply = `ℹ️ A quick reply named "${result.entry.label}" already exists. Ask me to update it instead.`;
+                } else if (result?.limitReached) {
+                    reply = `⚠️ The ${result.maxEntries}-reply limit is reached. Remove an old quick reply first.`;
+                } else if (result?.entry) {
+                    reply = `⚡ Quick reply added: "${result.entry.label}"\n${result.entry.text}`;
+                } else {
+                    reply = '⚠️ I could not add that quick reply.';
+                }
+            } else if (intent.action === 'update') {
+                const changes = {};
+                if (intent.label) changes.label = intent.label;
+                if (intent.text) changes.text = intent.text;
+                const result = await window.QuickReplyManager.updateByQuery(intent.target, changes);
+                if (result.ambiguous) {
+                    reply = `I found several possible quick replies:\n${formatQuickReplyEntries(result.matches)}\n\nPlease use the exact label.`;
+                } else if (result.result?.duplicate) {
+                    reply = `⚠️ A quick reply named "${result.result.entry.label}" already exists.`;
+                } else if (result.updated) {
+                    reply = `✏️ Quick reply updated: "${result.result.entry.label}"\n${result.result.entry.text}`;
+                } else {
+                    reply = `🤔 I could not find a quick reply matching "${intent.target}".`;
+                }
+            } else if (intent.action === 'remove') {
+                const result = await window.QuickReplyManager.removeByQuery(intent.target);
+                if (result.ambiguous) {
+                    reply = `I found several possible quick replies:\n${formatQuickReplyEntries(result.matches)}\n\nPlease use the exact label.`;
+                } else if (result.removed) {
+                    reply = `🗑️ Quick reply removed: "${result.removed.label}"`;
+                } else {
+                    reply = `🤔 I could not find a quick reply matching "${intent.target}".`;
+                }
+            }
+        } catch (error) {
+            reply = `❌ Quick reply error: ${error.message || error}`;
+        }
+
+        renderMessage(reply, "system compact");
+        return true;
     }
 
     function shouldAnalyzeMemoryIntent(text) {

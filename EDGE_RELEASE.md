@@ -84,7 +84,7 @@ Any pushed tag matching `v*` triggers upload and publish.
 Current `EDGE_API_KEY` expires:
 
 ```text
-2026-07-19 22:55
+2026-10-06 16:10
 ```
 
 Microsoft Edge Add-ons API keys do not auto-renew from this project. Before expiry, manually create/renew the API key in Partner Center and update this GitHub secret:
@@ -102,7 +102,7 @@ https://partner.microsoft.com/en-us/dashboard/microsoftedge/publishapi
 Reminder:
 
 ```text
-Renew EDGE_API_KEY before 2026-07-19 22:55.
+Renew EDGE_API_KEY before 2026-10-06 16:10.
 ```
 
 Partner Center:

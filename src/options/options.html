@@ -100,6 +100,35 @@
                 </div>
             </section>
 
+            <!-- Quick Replies Section -->
+            <section class="settings-section">
+                <div class="setting-item setting-item-vertical">
+                    <div class="setting-info">
+                        <h2>⚡ Quick Replies</h2>
+                        <p class="description">
+                            Reusable replies shown above the Etsy message field. Selecting one only inserts a draft —
+                            it never sends the message.
+                            <br>
+                            <small>You can also ask the AI chat to add, edit, list, or remove quick replies.</small>
+                        </p>
+                    </div>
+                    <div class="memory-panel">
+                        <ul id="quickReplyList" class="memory-list quick-reply-list">
+                            <li class="memory-empty">No quick replies yet.</li>
+                        </ul>
+                        <div class="quick-reply-editor">
+                            <input type="text" id="quickReplyLabelInput" class="input-field"
+                                placeholder="Short label…" maxlength="48">
+                            <textarea id="quickReplyTextInput" class="textarea-field quick-reply-textarea"
+                                placeholder="Reply text…" rows="3" maxlength="1500"></textarea>
+                            <button type="button" id="quickReplyAddBtn" class="reset-btn">➕ Add quick reply</button>
+                        </div>
+                        <button type="button" id="quickReplyClearBtn" class="reset-btn memory-clear-btn">🗑️ Clear all
+                            quick replies</button>
+                    </div>
+                </div>
+            </section>
+
             <!-- Agent Memory Section -->
             <section class="settings-section">
                 <div class="setting-item setting-item-vertical">
@@ -175,7 +204,7 @@
 
         <footer>
             <p>
-                <strong>Etsy AI Assistant</strong> v1.0
+                <strong>Etsy AI Assistant</strong> v<span id="extensionVersion">…</span>
                 <br>
                 <small>Made with ❤️ for better Etsy workflow</small>
             </p>
@@ -185,6 +214,7 @@
     <script src="../content/config.js"></script>
     <script src="../config/base_instruction.js"></script>
     <script src="../content/memory_manager.js"></script>
+    <script src="../content/quick_reply_manager.js"></script>
     <script src="options.js"></script>
 </body>
 

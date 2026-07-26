@@ -2,7 +2,7 @@
 
 Chrome extension that integrates AI assistance directly into Etsy pages, helping shop owners manage their business more efficiently.
 
-![Version](https://img.shields.io/badge/version-1.0-blue.svg)
+![Version](https://img.shields.io/badge/version-1.6.19-blue.svg)
 ![Manifest](https://img.shields.io/badge/manifest-v3-green.svg)
 
 ## ✨ Features
@@ -11,6 +11,8 @@ Chrome extension that integrates AI assistance directly into Etsy pages, helping
 - **Page Context Aware**: Automatically extracts and analyzes page content
 - **Multi-Model Support**: Choose from various Gemini AI models
 - **Chat History**: Persistent conversation history per page
+- **Quick Replies**: Reusable templates that insert into Etsy's draft field without sending
+- **Agent-Managed Templates**: Ask the AI chat to add, edit, list, or remove quick replies
 - **Markdown Rendering**: Beautiful formatting with code blocks, tables, and lists
 - **Drag & Drop UI**: Fully customizable positioning that persists
 - **Smart Tooltips**: Context-sensitive help throughout the interface
@@ -47,7 +49,7 @@ Chrome extension that integrates AI assistance directly into Etsy pages, helping
    - Open Chrome and navigate to `chrome://extensions/`
    - Enable "Developer mode" (toggle in top-right)
    - Click "Load unpacked"
-   - Select the `ChromeExtensionEtsyAI` folder
+   - Select the `ChromeExtensionEtsyAI/src` folder
 
 4. **Test the extension**
    - Visit any Etsy page (e.g., https://www.etsy.com/)
@@ -85,7 +87,9 @@ Models are configured in `content/config.js`. To add or change models:
 4. The AI will analyze the current Etsy page and respond
 
 ### Quick Actions
-- **Generate Draft**: Click the "Draft Reply" button to auto-generate a professional response
+- **AI Actions**: Suggest, rewrite, translate, summarize, or risk-check a reply
+- **Quick Replies**: Select a saved template above Etsy's message field; it is inserted as an unsent draft
+- **Manage Templates**: Click `Manage` beside the templates, or ask the AI chat to add/edit/list/remove one
 - **History**: View and restore previous chat sessions
 - **New Chat**: Start a fresh conversation
 
@@ -140,7 +144,8 @@ ChromeExtensionEtsyAI/
 
 ### Building & Testing
 
-No build step required! This is a pure JavaScript extension.
+Run `cmd /c build.bat` to generate the Chromium package in `dist/chrome` and the Firefox package in
+`dist/firefox`.
 
 **To test changes:**
 1. Make your code changes

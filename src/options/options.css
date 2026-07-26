@@ -426,6 +426,57 @@ input:checked+.slider:before {
     background: #c82333;
 }
 
+.quick-reply-list .memory-item {
+    align-items: center;
+}
+
+.quick-reply-content {
+    flex: 1;
+    min-width: 0;
+}
+
+.quick-reply-label {
+    display: block;
+    margin-bottom: 3px;
+    color: #222;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.quick-reply-preview {
+    color: #666;
+    font-size: 12px;
+    line-height: 1.4;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.quick-reply-editor {
+    display: grid;
+    grid-template-columns: minmax(140px, 0.35fr) minmax(220px, 1fr) auto;
+    gap: 8px;
+    align-items: stretch;
+}
+
+.quick-reply-editor .input-field,
+.quick-reply-editor .textarea-field,
+.quick-reply-editor .reset-btn {
+    margin-top: 0;
+}
+
+.quick-reply-textarea {
+    min-height: 44px;
+    padding: 10px 12px;
+    resize: vertical;
+}
+
+@media (max-width: 760px) {
+    .quick-reply-editor {
+        grid-template-columns: 1fr;
+    }
+}
+
 footer {
     background: #f8f9fa;
     padding: 20px 24px;

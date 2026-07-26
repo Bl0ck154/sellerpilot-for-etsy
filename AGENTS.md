@@ -26,5 +26,5 @@ gh run watch <run_id> --exit-status
 Important:
 - Edge uses `dist/chrome`; there is no separate `dist/edge` package.
 - Never print, edit, or rotate `EDGE_PRODUCT_ID`, `EDGE_CLIENT_ID`, or `EDGE_API_KEY` from code. They live in GitHub Actions secrets.
-- `EDGE_API_KEY` expires on `2026-07-19 22:55`; renewal instructions are in `EDGE_RELEASE.md`.
+- `EDGE_API_KEY` expires on `2026-10-06 16:10`; renewal instructions are in `EDGE_RELEASE.md`.
 - Do not self-update extension code from GitHub. Code updates go through Store/API releases; remote behavior policy is data-only.
