@@ -578,3 +578,24 @@
 - [x] Після оновлення secret повторно запущено `Microsoft Edge Add-ons Release` з `publish=true`.
 - [x] Run `30207836321` completed successfully in `1m0s`.
 - [x] Edge package upload, processing, draft publish, and publish processing all passed.
+
+---
+
+# Фаза 49 — Accurate concise technical briefs and Edge release 1.6.20 (2026-08-01)
+
+## План
+- [x] Перевірити primary model: `gemini-flash-latest` лишається moving latest alias у Gemini API.
+- [x] Перевести Gemini 3.x/latest з deprecated numeric `thinkingBudget` на `thinkingLevel`; для ТЗ використовувати `high`, для простих/середніх задач — `minimal`/`medium`.
+- [x] Зберегти numeric thinking budgets тільки для fallback `gemini-2.5-flash`.
+- [x] Посилити MODE B: silent coverage pass для кількості людей/тварин, розміщення, фону, ефектів для всіх, розмірів і винятків.
+- [x] Зробити ТЗ requirements-only за замовчуванням, без переказу стандартного типу лістинга, порожніх секцій і зайвого вступу.
+- [x] Передавати повний звичайний Etsy chat у межах загального safety budget, пріоритезуючи найновіші повідомлення у наддовгих чатах.
+- [x] Збільшити доступний опис primary listing з 2500 до 16000 символів і додати коротке очікування гідрації Etsy chat context.
+- [x] Додати regression test на 230 повідомлень, ранній фон, пізню вимогу «крила всім», довгий listing description і Gemini thinking mapping.
+- [x] Syntax checks, `ai_context_and_prompt.test.js`, `quick_reply_manager.test.js` і `cmd /c build.bat` пройшли; `dist/chrome/manifest.json` = `1.6.20`.
+- [x] Release commit `44f11b4` запушено в `main`.
+
+## Edge release
+- [x] Triggered GitHub Actions workflow `Microsoft Edge Add-ons Release` with `publish=true` for `1.6.20`.
+- [x] Run `30709673416` completed successfully.
+- [x] Edge package upload, processing, draft publish, and publish processing all passed.
