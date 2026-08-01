@@ -2,7 +2,7 @@
 
 Chrome extension that integrates AI assistance directly into Etsy pages, helping shop owners manage their business more efficiently.
 
-![Version](https://img.shields.io/badge/version-1.6.19-blue.svg)
+![Version](https://img.shields.io/badge/version-1.6.20-blue.svg)
 ![Manifest](https://img.shields.io/badge/manifest-v3-green.svg)
 
 ## ✨ Features
@@ -77,6 +77,8 @@ Models are configured in `content/config.js`. To add or change models:
 4. Reload the extension
 
 **Current default model**: `gemini-flash-latest`
+
+Gemini thinking is adaptive. Simple requests use `minimal`, medium-context requests use `medium`, and complex/important requests (including internal briefs / ТЗ) use `high`. The Gemini 2.5 fallback uses equivalent legacy numeric budgets.
 
 ## 🎯 Usage
 

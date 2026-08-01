@@ -108,7 +108,7 @@ AI: ${aiResponse}`;
     _selectThinkingMode(messages, systemInstruction) {
         const promptChars = this._getPromptSize(messages, systemInstruction);
         const lastUserMessage = [...messages].reverse().find(msg => msg.role === 'user')?.content || '';
-        const importantPattern = /важлив|термінов|urgent|important|strategy|стратег|аналіз|analy[sz]e|compare|порівняй|diagnos|чому|why|refund|case|dispute|скарг|negative review|відгук/i;
+        const importantPattern = /важлив|термінов|urgent|important|strategy|стратег|аналіз|analy[sz]e|compare|порівняй|diagnos|чому|why|refund|case|dispute|скарг|negative review|відгук|тз|технічн|техническ|\bbrief\b|task for|specification/i;
 
         if (promptChars > 18000 || messages.length > 14 || importantPattern.test(lastUserMessage)) {
             return 'deep';
@@ -119,15 +119,26 @@ AI: ${aiResponse}`;
         return 'fast';
     }
 
-    _getThinkingConfig(thinkingMode) {
+    _getThinkingConfig(thinkingMode, modelId = '') {
         // Gemini thinkingConfig is supported by newer Gemini models. If a model
         // rejects it, streamMessage retries the same model without this config.
+        // Gemini 3.x (including moving "latest" aliases) uses thinkingLevel.
+        // Gemini 2.5 only supports the legacy numeric thinkingBudget.
+        const usesThinkingLevel = /(?:^gemini-(?:3|flash)|-latest$)/i.test(modelId) &&
+            !/^gemini-2\.5/i.test(modelId);
+
+        if (usesThinkingLevel) {
+            if (thinkingMode === 'fast') return { thinkingLevel: 'minimal' };
+            if (thinkingMode === 'balanced') return { thinkingLevel: 'medium' };
+            return { thinkingLevel: 'high' };
+        }
+
         if (thinkingMode === 'fast') return { thinkingBudget: 0 };
         if (thinkingMode === 'balanced') return { thinkingBudget: 1024 };
         return { thinkingBudget: 4096 };
     }
 
-    _buildStreamPayload(contents, systemInstruction, thinkingMode) {
+    _buildStreamPayload(contents, systemInstruction, thinkingMode, modelId = '') {
         const payload = {
             contents: contents,
             system_instruction: {
@@ -137,7 +148,7 @@ AI: ${aiResponse}`;
 
         if (thinkingMode) {
             payload.generationConfig = {
-                thinkingConfig: this._getThinkingConfig(thinkingMode)
+                thinkingConfig: this._getThinkingConfig(thinkingMode, modelId)
             };
         }
 
@@ -423,7 +434,7 @@ AI: ${aiResponse}`;
 
         const contents = this._formatMessagesForGemini(messages);
 
-        const payload = this._buildStreamPayload(contents, systemInstruction, thinkingMode);
+        const payload = this._buildStreamPayload(contents, systemInstruction, thinkingMode, modelId);
 
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), timeoutMs);

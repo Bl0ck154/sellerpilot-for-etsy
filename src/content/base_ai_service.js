@@ -16,11 +16,11 @@ class BaseAIService {
 
         LIMITS: {
             pageMarkdownChars: 8000,
-            primaryListingDescriptionChars: 2500,
+            primaryListingDescriptionChars: 16000,
             secondaryListings: 3,
             secondarySnippetChars: 140,
-            etsyChatMessages: 20,
-            etsyChatMessageChars: 1000
+            etsyChatMessageChars: 6000,
+            etsyChatTotalChars: 160000
         },
 
         lastBuildMetadata: null,
@@ -401,12 +401,16 @@ ${markdown ? `\n\nPAGE CONTENT:\n${markdown}` : ''}`;
                     return '';
                 }
 
-                const result = await chrome.storage.local.get(['ETSY_CHAT_HISTORY']);
-                const chatHistory = result.ETSY_CHAT_HISTORY;
+                let result = await chrome.storage.local.get(['ETSY_CHAT_HISTORY']);
+                let chatHistory = result.ETSY_CHAT_HISTORY;
 
-                if (!chatHistory?.messages?.length) {
-                    return '';
+                if (!chatHistory?.messages?.length || String(chatHistory.convo_id || '') !== currentConvoId) {
+                    await this.waitForChatHistory(currentConvoId, 1500);
+                    result = await chrome.storage.local.get(['ETSY_CHAT_HISTORY']);
+                    chatHistory = result.ETSY_CHAT_HISTORY;
                 }
+
+                if (!chatHistory?.messages?.length) return '';
 
                 // STRICT: Must match current conversation ID
                 if (!chatHistory.convo_id || chatHistory.convo_id !== currentConvoId) {
@@ -421,7 +425,26 @@ ${markdown ? `\n\nPAGE CONTENT:\n${markdown}` : ''}`;
                 let context = `\n\n### CUSTOMER_CONVERSATION_HISTORY [CONTEXT_AGE: ${this.formatAge(age)}]:\n`;
                 context += '(Messages between the Owner and the customer, oldest → newest.)\n\n';
 
-                const messages = chatHistory.messages.slice(-this.LIMITS.etsyChatMessages);
+                const candidateMessages = chatHistory.messages;
+                const messages = [];
+                let totalMessageChars = 0;
+
+                // Select newest-first so recent order requirements can never be pushed out
+                // by a very long conversation, then restore chronological display order.
+                for (let i = candidateMessages.length - 1; i >= 0; i--) {
+                    const msg = candidateMessages[i];
+                    const rawText = msg.message_body || msg.message || '';
+                    const textChars = Math.min(rawText.length, this.LIMITS.etsyChatMessageChars);
+                    if (messages.length > 0 && totalMessageChars + textChars > this.LIMITS.etsyChatTotalChars) break;
+                    messages.push(msg);
+                    totalMessageChars += textChars;
+                }
+                messages.reverse();
+
+                const omittedCount = chatHistory.messages.length - messages.length;
+                if (omittedCount > 0) {
+                    context += `[${omittedCount} oldest message(s) omitted only because the conversation exceeded the safety budget; all newest messages are included.]\n\n`;
+                }
 
                 for (const msg of messages) {
                     const sender = msg.sender_display_name || `User ${msg.sender_user_id || msg.sender_id}` || 'Unknown';
@@ -450,6 +473,23 @@ ${markdown ? `\n\nPAGE CONTENT:\n${markdown}` : ''}`;
                 console.warn('⚠️ getChatHistoryContext: Failed to load:', error);
                 return '';
             }
+        },
+
+        async waitForChatHistory(convoId, timeoutMs = 1500) {
+            const started = Date.now();
+            while (Date.now() - started < timeoutMs) {
+                try {
+                    const result = await chrome.storage.local.get(['ETSY_CHAT_HISTORY']);
+                    const history = result.ETSY_CHAT_HISTORY;
+                    if (history?.messages?.length && String(history.convo_id || '') === String(convoId)) {
+                        return true;
+                    }
+                } catch (_) {
+                    return false;
+                }
+                await new Promise(resolve => setTimeout(resolve, 150));
+            }
+            return false;
         }
     };
 
