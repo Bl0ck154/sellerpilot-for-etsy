@@ -599,3 +599,23 @@
 - [x] Triggered GitHub Actions workflow `Microsoft Edge Add-ons Release` with `publish=true` for `1.6.20`.
 - [x] Run `30709673416` completed successfully.
 - [x] Edge package upload, processing, draft publish, and publish processing all passed.
+
+---
+
+# Phase 50 — Quick Replies UX hotfix and Edge release 1.6.21 (2026-08-02)
+
+## Plan
+- [x] Fix `Manage` so it opens and focuses Settings at `#quick-replies`, including an existing tab/window and a direct fallback.
+- [x] Remove the redundant inserted/review toast while preserving the 450 ms draft-insertion animation and never activating Send.
+- [x] Make the Quick Replies toolbar transparent and independent from the Etsy composer focus frame.
+- [x] Keep up to 30 reply chips in one stable, horizontally scrollable row without a visible scrollbar or page-scroll trapping.
+- [x] Widen Settings, collapse API keys by default, remove repeated key-helper copy, and reduce the Chat Manager switch visual size.
+- [x] Preserve manual and agent-managed add/edit/list/remove flows; verify bounded Settings overflow with 28 replies.
+- [x] Repair trailing-comma Gemini JSON, reject wrong JSON shapes, and avoid recording a success cooldown after parsing failure.
+- [x] Syntax, unit, Chromium integration, build, and `dist/chrome/manifest.json` version checks passed for `1.6.21`.
+- [x] Release commit `a7f7938` pushed to `main`.
+
+## Edge release
+- [x] Triggered GitHub Actions workflow `Microsoft Edge Add-ons Release` with `publish=true` for `1.6.21`.
+- [x] Run `30735603666` completed successfully in `52s`.
+- [x] Edge package upload, processing, draft publish, and publish processing all passed.
