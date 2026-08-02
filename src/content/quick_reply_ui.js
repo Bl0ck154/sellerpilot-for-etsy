@@ -117,14 +117,29 @@
         animation.finished.catch(() => { }).finally(() => flyer.remove());
     }
 
-    function showInsertedStatus(toolbar, label) {
-        const status = toolbar.querySelector('.etsy-ai-quick-replies-status');
-        if (!status) return;
-        status.textContent = `"${label}" inserted — review before sending`;
-        clearTimeout(status._clearTimer);
-        status._clearTimer = setTimeout(() => {
-            status.textContent = '';
-        }, 2600);
+    async function openQuickReplySettings(button) {
+        if (button.dataset.opening === 'true') return;
+        button.dataset.opening = 'true';
+        button.disabled = true;
+
+        try {
+            const response = await chrome.runtime.sendMessage({ type: 'OPEN_OPTIONS_PAGE' });
+            if (!response?.success) {
+                throw new Error(response?.error || 'Background did not open extension options');
+            }
+        } catch (backgroundError) {
+            try {
+                await Promise.resolve(chrome.runtime.openOptionsPage());
+            } catch (directError) {
+                console.warn('Quick replies: could not open settings', {
+                    backgroundError: backgroundError?.message || String(backgroundError),
+                    directError: directError?.message || String(directError)
+                });
+            }
+        } finally {
+            button.disabled = false;
+            delete button.dataset.opening;
+        }
     }
 
     function buildToolbar(entries, textarea, conversationId) {
@@ -140,6 +155,13 @@
 
         const chips = document.createElement('div');
         chips.className = 'etsy-ai-quick-replies-chips';
+        chips.addEventListener('wheel', event => {
+            if (chips.scrollWidth <= chips.clientWidth) return;
+            if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
+            const previousScrollLeft = chips.scrollLeft;
+            chips.scrollLeft += event.deltaY;
+            if (chips.scrollLeft !== previousScrollLeft) event.preventDefault();
+        }, { passive: false });
 
         if (!entries.length) {
             const empty = document.createElement('span');
@@ -158,7 +180,6 @@
                 button.addEventListener('click', () => {
                     animateReplyToTextarea(button, textarea);
                     insertReply(textarea, entry.text);
-                    showInsertedStatus(toolbar, entry.label);
                 });
                 chips.appendChild(button);
             }
@@ -169,23 +190,9 @@
         manageButton.className = 'etsy-ai-quick-replies-manage';
         manageButton.textContent = 'Manage';
         manageButton.title = 'Manage quick replies in extension settings';
-        manageButton.addEventListener('click', () => {
-            try {
-                const openResult = chrome.runtime.openOptionsPage();
-                openResult?.catch?.(error => {
-                    console.warn('Quick replies: could not open settings', error);
-                });
-            } catch (error) {
-                console.warn('Quick replies: could not open settings', error);
-            }
-        });
+        manageButton.addEventListener('click', () => openQuickReplySettings(manageButton));
 
-        const status = document.createElement('span');
-        status.className = 'etsy-ai-quick-replies-status';
-        status.setAttribute('role', 'status');
-        status.setAttribute('aria-live', 'polite');
-
-        toolbar.append(heading, chips, status, manageButton);
+        toolbar.append(heading, chips, manageButton);
         return toolbar;
     }
 
@@ -206,14 +213,17 @@
         if (generation !== renderGeneration || !textarea.isConnected || conversationId !== getConversationId()) return;
 
         const hash = entries.map(entry => `${entry.id}:${entry.updatedAt || entry.createdAt}:${entry.label}:${entry.text}`).join('|');
+        const composeContainer = textarea.closest('.inline-compose-container');
+        const mountParent = composeContainer?.parentElement || textarea.parentElement;
+        const mountBefore = composeContainer || textarea;
+        if (!mountParent || !mountBefore) return;
+
         const existing = document.getElementById(TOOLBAR_ID);
-        if (!force && existing && hash === lastHash && conversationId === lastConversationId) return;
+        const correctlyMounted = existing?.parentElement === mountParent && existing?.nextElementSibling === mountBefore;
+        if (!force && existing && correctlyMounted && hash === lastHash && conversationId === lastConversationId) return;
 
         existing?.remove();
-        const host = textarea.closest('.inline-compose-container') || textarea.parentElement;
-        if (!host) return;
-
-        host.insertBefore(buildToolbar(entries, textarea, conversationId), host.firstChild);
+        mountParent.insertBefore(buildToolbar(entries, textarea, conversationId), mountBefore);
         lastHash = hash;
         lastConversationId = conversationId;
     }

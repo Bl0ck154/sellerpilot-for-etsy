@@ -11,6 +11,22 @@ const statusElement = document.getElementById('status');
 const statusText = statusElement.querySelector('.status-text');
 const extensionVersion = document.getElementById('extensionVersion');
 
+function focusQuickRepliesFromHash() {
+    if (window.location.hash !== '#quick-replies') return;
+
+    const quickRepliesSection = document.getElementById('quick-replies');
+    if (!quickRepliesSection) return;
+
+    quickRepliesSection.tabIndex = -1;
+    requestAnimationFrame(() => {
+        const prefersReducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+        quickRepliesSection.scrollIntoView({ behavior: prefersReducedMotion ? 'auto' : 'smooth', block: 'start' });
+        quickRepliesSection.focus({ preventScroll: true });
+    });
+}
+
+window.addEventListener('hashchange', focusQuickRepliesFromHash);
+
 if (extensionVersion) {
     extensionVersion.textContent = chrome.runtime.getManifest().version;
 }
@@ -513,3 +529,4 @@ if (chrome?.storage?.onChanged) {
 loadSettings();
 renderQuickReplyList();
 renderMemoryList();
+focusQuickRepliesFromHash();

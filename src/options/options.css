@@ -21,7 +21,7 @@ body {
     background: white;
     border-radius: 16px;
     box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-    max-width: 600px;
+    max-width: 920px;
     width: 100%;
     overflow: hidden;
 }
@@ -45,7 +45,7 @@ header h1 {
 }
 
 main {
-    padding: 32px 24px;
+    padding: 32px;
 }
 
 .settings-section {
@@ -86,6 +86,108 @@ main {
 }
 
 .setting-info a:hover {
+    text-decoration: underline;
+}
+
+/* Compact API credentials disclosure */
+.settings-disclosure {
+    overflow: hidden;
+    background: #f8f9fa;
+    border: 2px solid transparent;
+    border-radius: 12px;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+}
+
+.settings-disclosure:hover,
+.settings-disclosure[open] {
+    background: #fff;
+    border-color: #F1641E;
+    box-shadow: 0 4px 12px rgba(241, 100, 30, 0.1);
+}
+
+.settings-disclosure-summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 24px;
+    padding: 20px;
+    cursor: pointer;
+    list-style: none;
+}
+
+.settings-disclosure-summary::-webkit-details-marker {
+    display: none;
+}
+
+.settings-disclosure-summary:focus-visible {
+    outline: 3px solid rgba(241, 100, 30, 0.35);
+    outline-offset: -3px;
+}
+
+.disclosure-title {
+    display: block;
+    margin-bottom: 6px;
+    color: #222;
+    font-size: 18px;
+    font-weight: 600;
+}
+
+.settings-disclosure-summary .description {
+    display: block;
+}
+
+.disclosure-chevron {
+    width: 10px;
+    height: 10px;
+    margin-right: 5px;
+    flex: 0 0 auto;
+    border-right: 2px solid #666;
+    border-bottom: 2px solid #666;
+    transform: rotate(45deg) translateY(-2px);
+    transition: transform 0.2s ease;
+}
+
+.settings-disclosure[open] .disclosure-chevron {
+    transform: rotate(225deg) translate(-2px, -2px);
+}
+
+.api-key-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    padding: 0 20px 20px;
+}
+
+.api-key-card {
+    min-width: 0;
+    padding: 14px;
+    background: #f8f9fa;
+    border: 1px solid #e3e6e8;
+    border-radius: 9px;
+}
+
+.api-key-heading {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.api-key-heading label {
+    color: #222;
+    font-size: 14px;
+    font-weight: 700;
+}
+
+.api-key-heading a {
+    color: #b84b16;
+    font-size: 12px;
+    font-weight: 600;
+    text-decoration: none;
+    white-space: nowrap;
+}
+
+.api-key-heading a:hover {
     text-decoration: underline;
 }
 
@@ -226,8 +328,9 @@ main {
 .toggle-switch {
     position: relative;
     display: inline-block;
-    width: 60px;
-    height: 34px;
+    width: 48px;
+    height: 44px;
+    padding: 11px 4px;
     flex-shrink: 0;
 }
 
@@ -240,22 +343,22 @@ main {
 .slider {
     position: absolute;
     cursor: pointer;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
+    top: 12px;
+    left: 4px;
+    right: 4px;
+    bottom: 12px;
     background-color: #ccc;
     transition: 0.4s;
-    border-radius: 34px;
+    border-radius: 20px;
 }
 
 .slider:before {
     position: absolute;
     content: "";
-    height: 26px;
-    width: 26px;
-    left: 4px;
-    bottom: 4px;
+    height: 16px;
+    width: 16px;
+    left: 2px;
+    bottom: 2px;
     background-color: white;
     transition: 0.4s;
     border-radius: 50%;
@@ -267,7 +370,12 @@ input:checked+.slider {
 }
 
 input:checked+.slider:before {
-    transform: translateX(26px);
+    transform: translateX(20px);
+}
+
+.toggle-switch input:focus-visible+.slider {
+    outline: 3px solid rgba(241, 100, 30, 0.35);
+    outline-offset: 3px;
 }
 
 /* Status Message */
@@ -471,7 +579,32 @@ input:checked+.slider:before {
     resize: vertical;
 }
 
+#quick-replies {
+    scroll-margin-top: 20px;
+}
+
+#quick-replies:focus {
+    outline: none;
+}
+
+#quick-replies:focus-visible .setting-item {
+    outline: 3px solid rgba(241, 100, 30, 0.35);
+    outline-offset: 3px;
+}
+
 @media (max-width: 760px) {
+    body {
+        padding: 12px;
+    }
+
+    main {
+        padding: 24px 18px;
+    }
+
+    .api-key-grid {
+        grid-template-columns: 1fr;
+    }
+
     .quick-reply-editor {
         grid-template-columns: 1fr;
     }

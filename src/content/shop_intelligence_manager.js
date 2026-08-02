@@ -164,9 +164,63 @@ SNAPSHOT:
 ${JSON.stringify(snapshot, null, 2)}`;
     }
 
+    function stripTrailingCommas(jsonText) {
+        let result = '';
+        let inString = false;
+        let escaped = false;
+
+        for (let index = 0; index < jsonText.length; index++) {
+            const char = jsonText[index];
+            if (inString) {
+                result += char;
+                if (escaped) escaped = false;
+                else if (char === '\\') escaped = true;
+                else if (char === '"') inString = false;
+                continue;
+            }
+
+            if (char === '"') {
+                inString = true;
+                result += char;
+                continue;
+            }
+
+            if (char === ',') {
+                let nextIndex = index + 1;
+                while (nextIndex < jsonText.length && /\s/.test(jsonText[nextIndex])) nextIndex++;
+                if (jsonText[nextIndex] === '}' || jsonText[nextIndex] === ']') continue;
+            }
+            result += char;
+        }
+        return result;
+    }
+
     function parseJsonResponse(text) {
-        const clean = (text || '').trim().replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```$/i, '').trim();
-        return JSON.parse(clean);
+        const withoutFences = String(text || '')
+            .trim()
+            .replace(/^```json\s*/i, '')
+            .replace(/^```\s*/i, '')
+            .replace(/```\s*$/i, '')
+            .trim();
+        const objectStart = withoutFences.indexOf('{');
+        const objectEnd = withoutFences.lastIndexOf('}');
+        const clean = objectStart >= 0 && objectEnd > objectStart
+            ? withoutFences.slice(objectStart, objectEnd + 1)
+            : withoutFences;
+
+        let parsed;
+        try {
+            parsed = JSON.parse(clean);
+        } catch (originalError) {
+            const repaired = stripTrailingCommas(clean);
+            if (repaired === clean) throw originalError;
+            parsed = JSON.parse(repaired);
+        }
+
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+            throw new SyntaxError('Shop intelligence response must be a JSON object');
+        }
+        return parsed;
     }
 
     function buildSummaryText(data, sources) {
@@ -212,7 +266,11 @@ ${JSON.stringify(snapshot, null, 2)}`;
                 },
                 body: JSON.stringify({
                     contents: [{ role: 'user', parts: [{ text: buildGeminiPrompt(snapshot, sources, reason) }] }],
-                    generationConfig: { temperature: 0.2, maxOutputTokens: 900 }
+                    generationConfig: {
+                        temperature: 0.2,
+                        maxOutputTokens: 900,
+                        responseMimeType: 'application/json'
+                    }
                 }),
                 signal: controller.signal
             });
@@ -236,7 +294,6 @@ ${JSON.stringify(snapshot, null, 2)}`;
                 return false;
             }
 
-            await setStorage({ [REFRESH_KEY]: Date.now() });
             const summaryJson = await callGeminiSummary(apiKey, snapshot, sources, reason);
             const summary = {
                 version: VERSION,

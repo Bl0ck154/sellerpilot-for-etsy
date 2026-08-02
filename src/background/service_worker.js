@@ -96,7 +96,43 @@ checkForManifestUpdate();
 // Обробники повідомлень
 // ============================================
 
+async function openQuickReplyOptions() {
+    const optionsBaseUrl = chrome.runtime.getURL('options/options.html');
+    const optionsUrl = `${optionsBaseUrl}#quick-replies`;
+
+    try {
+        const tabs = await chrome.tabs.query({});
+        const existing = tabs.find(tab => typeof tab.url === 'string' && tab.url.startsWith(optionsBaseUrl));
+        if (Number.isInteger(existing?.id)) {
+            await chrome.tabs.update(existing.id, { url: optionsUrl, active: true });
+            if (Number.isInteger(existing.windowId) && chrome.windows?.update) {
+                try {
+                    await chrome.windows.update(existing.windowId, { focused: true });
+                } catch (windowError) {
+                    console.warn('Could not focus the existing options window', windowError);
+                }
+            }
+            return;
+        }
+        await chrome.tabs.create({ url: optionsUrl, active: true });
+    } catch (tabError) {
+        console.warn('Could not deep-link quick reply settings; opening default options page', tabError);
+        await chrome.runtime.openOptionsPage();
+    }
+}
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message.type === 'OPEN_OPTIONS_PAGE') {
+        Promise.resolve()
+            .then(() => openQuickReplyOptions())
+            .then(() => sendResponse({ success: true }))
+            .catch((error) => {
+                console.error('Failed to open extension options:', error);
+                sendResponse({ success: false, error: error?.message || String(error) });
+            });
+        return true;
+    }
+
     if (message.type === "ETSY_DATA_PARSED") {
         chrome.storage.local.set({ 'current_context': message.payload })
             .then(() => {

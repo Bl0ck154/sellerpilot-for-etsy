@@ -2,7 +2,7 @@
 
 Chrome extension that integrates AI assistance directly into Etsy pages, helping shop owners manage their business more efficiently.
 
-![Version](https://img.shields.io/badge/version-1.6.20-blue.svg)
+![Version](https://img.shields.io/badge/version-1.6.21-blue.svg)
 ![Manifest](https://img.shields.io/badge/manifest-v3-green.svg)
 
 ## ✨ Features

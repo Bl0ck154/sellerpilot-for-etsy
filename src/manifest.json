@@ -1,7 +1,7 @@
 {
     "manifest_version": 3,
     "name": "Etsy AI Assistant",
-    "version": "1.6.20",
+    "version": "1.6.21",
     "description": "AI assistant integrated into Etsy pages",
     "permissions": [
         "scripting",
