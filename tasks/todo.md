@@ -619,3 +619,24 @@
 - [x] Triggered GitHub Actions workflow `Microsoft Edge Add-ons Release` with `publish=true` for `1.6.21`.
 - [x] Run `30735603666` completed successfully in `52s`.
 - [x] Edge package upload, processing, draft publish, and publish processing all passed.
+
+---
+
+# Phase 51 — Context intelligence, custom AI provider, and Edge release 1.6.22 (2026-08-14)
+
+## Plan
+- [x] Replace reply-shaping regexes, phrase blacklists, fixed response examples, and lexical memory-conflict deletion with model reasoning or conservative exact operations.
+- [x] Preserve complete ordinary Etsy conversations; retain the beginning and latest messages and semantically compress only an exceptionally long omitted middle, with bounded foreground latency and cached background completion.
+- [x] Analyze every structured customer image with Gemini Vision, prioritizing source quality, resolution, sharpness, compression, lighting, cropping, and achievable-result limitations.
+- [x] Make image analysis conversation-safe, cache task-aware results, defer repeated failures, expose coverage, and keep DOM-only speaker attribution uncertain.
+- [x] Prevent conversation/listing Shop Intelligence from leaking into another customer or scope; add robust Owner/Customer role attribution.
+- [x] Keep stable reasoning and truth boundaries active when Owner custom instructions exist; invalidate incompatible cached behavior policy.
+- [x] Add an OpenAI-compatible custom provider with model/base URL/key settings, exact-origin optional permission, background streaming, optional keyless local endpoints, and an opt-in fallback that never mixes providers after output begins.
+- [x] Add real Gemini model fallback for vision, semantic compression, and derived Shop Intelligence calls.
+- [x] Syntax checks, 9 unit/regression suites, Chromium background-stream coverage, release build, and Chrome/Firefox manifest version checks passed for `1.6.22`.
+- [x] Release commit `6ea649b` pushed to `main`.
+
+## Edge release
+- [x] Triggered GitHub Actions workflow `Microsoft Edge Add-ons Release` with `publish=true` for `1.6.22`.
+- [x] Run `31775855265` completed successfully in `1m1s`.
+- [x] Edge package upload, processing, draft publish, and publish processing all passed.
