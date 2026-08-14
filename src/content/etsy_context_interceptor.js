@@ -124,6 +124,12 @@ window.EtsyContextInterceptor = (function () {
                 await chrome.storage.local.remove(STORAGE_KEYS.CURRENT_LISTING_ID);
             }
         }
+
+        // Analyze every newly received customer image after listing context is ready.
+        // Cached summaries are reused by the assistant; no keyword intent gate is used.
+        window.ImageIntelligenceManager?.analyzeCurrentCustomerImages().catch(error => {
+            console.warn('ImageIntelligence: background analysis failed', error);
+        });
     }
 
     // === INITIALIZATION ===

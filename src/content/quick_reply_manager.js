@@ -105,15 +105,10 @@ window.QuickReplyManager = (function () {
         const label = normalize(entry.label);
         const text = normalize(entry.text);
         if (label === needle) return 100;
-        if (label.startsWith(needle)) return 80;
-        if (label.includes(needle)) return 70;
-        if (text.includes(needle)) return 50;
-
-        const tokens = needle.split(' ').filter(token => token.length > 2);
-        if (!tokens.length) return 0;
-        const haystack = `${label} ${text}`;
-        const matches = tokens.filter(token => haystack.includes(token)).length;
-        return matches ? Math.round((matches / tokens.length) * 40) : 0;
+        if (text === needle) return 90;
+        if (label.includes(needle) || needle.includes(label)) return 60;
+        if (text.includes(needle) || needle.includes(text)) return 50;
+        return 0;
     }
 
     async function find(query) {
@@ -177,7 +172,7 @@ window.QuickReplyManager = (function () {
     async function updateByQuery(query, changes = {}) {
         const matches = await find(query);
         if (!matches.length) return { updated: false, matches: [] };
-        if (matches.length > 1 && scoreMatch(query, matches[0]) < 80) {
+        if (scoreMatch(query, matches[0]) < 90 || (matches[1] && scoreMatch(query, matches[1]) === scoreMatch(query, matches[0]))) {
             return { updated: false, ambiguous: true, matches: matches.slice(0, 5) };
         }
         const result = await update(matches[0].id, changes);
@@ -195,7 +190,7 @@ window.QuickReplyManager = (function () {
     async function removeByQuery(query) {
         const matches = await find(query);
         if (!matches.length) return { removed: null, matches: [] };
-        if (matches.length > 1 && scoreMatch(query, matches[0]) < 80) {
+        if (scoreMatch(query, matches[0]) < 90 || (matches[1] && scoreMatch(query, matches[1]) === scoreMatch(query, matches[0]))) {
             return { removed: null, ambiguous: true, matches: matches.slice(0, 5) };
         }
         const removed = await removeById(matches[0].id);

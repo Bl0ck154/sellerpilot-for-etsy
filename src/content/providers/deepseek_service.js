@@ -100,7 +100,7 @@ AI: ${aiResponse}`;
                 url,
                 model: modelId,
                 messageCount: messagesWithSystem.length,
-                apiKeyPrefix: apiKey ? apiKey.substring(0, 10) + '...' : 'MISSING'
+                hasApiKey: Boolean(apiKey)
             });
 
             const response = await fetch(url, {

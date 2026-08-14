@@ -10,6 +10,9 @@ let updatedTab = null;
 let focusedWindow = null;
 let availableTabs = [];
 let queryError = null;
+let connectListener = null;
+let customSettings = {};
+let fetchImpl = async () => ({ json: async () => ({ version: 'test' }) });
 
 const chrome = {
     alarms: {
@@ -23,6 +26,9 @@ const chrome = {
         openOptionsPage: async () => { optionsOpenCount += 1; },
         onMessage: {
             addListener(listener) { messageListener = listener; }
+        },
+        onConnect: {
+            addListener(listener) { connectListener = listener; }
         },
         sendMessage: async () => ({ success: true }),
         getContexts: async () => []
@@ -41,7 +47,7 @@ const chrome = {
     },
     storage: {
         local: {
-            async get() { return {}; },
+            async get() { return { ...customSettings }; },
             async set() { },
             async remove() { }
         }
@@ -59,7 +65,14 @@ const context = {
     setTimeout,
     clearTimeout,
     btoa: value => Buffer.from(value).toString('base64'),
-    fetch: async () => ({ json: async () => ({ version: 'test' }) })
+    fetch: (...args) => fetchImpl(...args),
+    URL,
+    Response,
+    ReadableStream,
+    TextEncoder,
+    TextDecoder,
+    AbortController,
+    DOMException
 };
 vm.createContext(context);
 vm.runInContext(
@@ -107,6 +120,40 @@ vm.runInContext(
     response = await openOptions();
     assert.equal(optionsOpenCount, 1, 'default options page is used when tab APIs fail');
     assert.equal(response?.success, true);
+
+    assert.equal(typeof connectListener, 'function', 'custom provider stream listener is registered');
+    customSettings = {
+        custom_provider_enabled: true,
+        custom_base_url: 'https://provider.test/v1',
+        custom_api_key: 'background-secret',
+        custom_model: 'custom-model'
+    };
+    let capturedFetch = null;
+    fetchImpl = async (url, options) => {
+        capturedFetch = { url, options };
+        return new Response('data: {"choices":[{"delta":{"content":"Background stream"}}]}\n\ndata: [DONE]\n', {
+            headers: { 'content-type': 'text/event-stream' }
+        });
+    };
+
+    const inboundListeners = [];
+    const disconnectListeners = [];
+    const outbound = [];
+    const port = {
+        name: 'custom-ai-stream',
+        sender: { tab: { url: 'https://www.etsy.com/messages/123' } },
+        onMessage: { addListener(listener) { inboundListeners.push(listener); } },
+        onDisconnect: { addListener(listener) { disconnectListeners.push(listener); } },
+        postMessage(message) { outbound.push(message); },
+        disconnect() { disconnectListeners.forEach(listener => listener()); }
+    };
+    connectListener(port);
+    inboundListeners[0]({ type: 'start', modelId: 'custom-model', messages: [{ role: 'user', content: 'Hi' }], systemInstruction: 'System' });
+    await new Promise(resolve => setTimeout(resolve, 10));
+    assert.equal(capturedFetch.url, 'https://provider.test/v1/chat/completions');
+    assert.equal(capturedFetch.options.headers.Authorization, 'Bearer background-secret');
+    assert.equal(capturedFetch.options.redirect, 'error');
+    assert.equal(outbound.find(message => message.type === 'complete')?.fullText, 'Background stream');
 
     console.log('background options tests passed');
 })().catch(error => {

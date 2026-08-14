@@ -82,8 +82,13 @@ const instructions = context.window.BaseAIService.INSTRUCTIONS;
 
     assert.equal(
         service._selectThinkingMode([{ role: 'user', content: 'Напиши ТЗ для дизайнера' }], ''),
+        'balanced',
+        'short requests use semantic reasoning without keyword-triggered mode switches'
+    );
+    assert.equal(
+        service._selectThinkingMode([{ role: 'user', content: 'Analyze this context' }], 'x'.repeat(61000)),
         'deep',
-        'technical briefs must receive deep reasoning'
+        'large contexts receive deep reasoning based on actual complexity'
     );
     assert.equal(
         JSON.stringify(service._getThinkingConfig('deep', 'gemini-flash-latest')),
@@ -102,9 +107,12 @@ const instructions = context.window.BaseAIService.INSTRUCTIONS;
 
     storage.ETSY_CHAT_HISTORY = {
         convo_id: '123',
+        customer_user_id: 'buyer-1',
+        customer_display_name: 'Customer',
         timestamp: Date.now(),
         messages: Array.from({ length: 230 }, (_, index) => ({
             sender_display_name: index % 2 ? 'Owner' : 'Customer',
+            sender_user_id: index % 2 ? 'owner-1' : 'buyer-1',
             message_body: index === 0
                 ? 'Use the forest background discussed at the start.'
                 : index === 229
@@ -117,6 +125,32 @@ const instructions = context.window.BaseAIService.INSTRUCTIONS;
     const chatContext = await instructions.getChatHistoryContext();
     assert.match(chatContext, /forest background/, 'context keeps the full ordinary chat instead of only a fixed tail');
     assert.match(chatContext, /wings to every person/, 'context keeps the newest scoped requirement');
+    assert.match(chatContext, /\[CUSTOMER: Customer\]/, 'Etsy messages receive explicit participant roles');
+
+    // Force the safety budget to omit part of an unusually large thread. The generic
+    // selection policy must preserve both ends without guessing which words are important.
+    let summarizedMessages = [];
+    context.window.ConversationContextManager = {
+        async getOrCreateSummary(_conversation, omittedMessages) {
+            summarizedMessages = omittedMessages;
+            return 'The omitted middle contains preserved decisions and corrections.';
+        },
+        buildContextSection(summary) {
+            return `### CUSTOMER_CONVERSATION_MIDDLE_SUMMARY\n${summary}\n`;
+        }
+    };
+    instructions.LIMITS.etsyChatTotalChars = 220;
+    const truncatedChatContext = await instructions.getChatHistoryContext();
+    assert.match(truncatedChatContext, /forest background/, 'the beginning of a large conversation remains available');
+    assert.match(truncatedChatContext, /wings to every person/, 'the newest part of a large conversation remains available');
+    assert.match(truncatedChatContext, /middle message\(s\) omitted/, 'only the middle is dropped under the safety budget');
+    assert.match(truncatedChatContext, /CUSTOMER_CONVERSATION_MIDDLE_SUMMARY/, 'omitted middle messages are semantically compressed');
+    assert.ok(summarizedMessages.length > 0, 'the compressor receives the actual omitted messages');
+    instructions.LIMITS.etsyChatTotalChars = 160000;
+
+    storage.current_chat_messages_scope = [{ type: 'user', text: 'Current request' }];
+    const assistantHistory = await service.buildConversationHistory('current_chat_messages_scope', 'Current request');
+    assert.equal(assistantHistory.length, 1, 'the current Owner turn is not duplicated after it has already been saved');
 
     const longListingDescription = `Standard service. ${'detail '.repeat(700)}FINAL LISTING RULE`;
     storage.ETSY_CURRENT_LISTING_ID = '99999';
@@ -130,10 +164,34 @@ const instructions = context.window.BaseAIService.INSTRUCTIONS;
     const listingContext = await instructions.getRAGContext();
     assert.match(listingContext, /FINAL LISTING RULE/, 'normal Etsy listing descriptions are passed without the old 2500-char truncation');
 
+    storage.custom_instructions = 'Use the shop-specific vocabulary saved by the Owner.';
+    const instructionWithCustomization = await instructions.buildFullInstruction({
+        page_content: { title: 'Test', hasContent: false },
+        metadata: { url: 'https://www.etsy.com/messages/123' }
+    });
+    assert.match(instructionWithCustomization, /^BASE/, 'custom instructions do not replace the stable base policy');
+    assert.match(instructionWithCustomization, /OWNER_CUSTOM_INSTRUCTIONS/);
+    assert.match(instructionWithCustomization, /shop-specific vocabulary/);
+    delete storage.custom_instructions;
+
     const basePrompt = read('src/config/base_instruction.js');
-    assert.match(basePrompt, /Silently make a coverage pass/);
-    assert.match(basePrompt, /Never silently narrow "add wings to everyone" to one person/);
-    assert.match(basePrompt, /Do not explain the listing, restate the obvious service category/);
+    assert.match(basePrompt, /Use judgment about relevance/);
+    assert.match(basePrompt, /read the whole available conversation and product context/);
+    assert.match(basePrompt, /An open Etsy messages page provides context; it does not automatically/);
+    assert.match(basePrompt, /revisit the original task using preceding turns/);
+    assert.match(basePrompt, /Select the requirements, constraints, decisions, unresolved points/);
+    assert.doesNotMatch(basePrompt, /Dates and deadlines are first-class requirements/);
+    assert.doesNotMatch(basePrompt, /Ты что\?|навіщо я вказала скріншот|зачем я указала скриншот/);
+    assert.doesNotMatch(basePrompt, /### EXAMPLES|\*\*Correct output|\*\*Wrong/);
+
+    const policy = JSON.parse(read('src/config/agent_policy.json'));
+    assert.match(policy.systemAddendum, /according to their relevance and reliability/);
+    assert.doesNotMatch(policy.systemAddendum, /CONVERSATION_KEY_DETAILS|Include active dates\/deadlines/);
+
+    const chatUiSource = read('src/content/chat_ui.js');
+    assert.match(chatUiSource, /Use semantic intent, not keyword matching/);
+    assert.match(chatUiSource, /analyzeCurrentCustomerImages/);
+    assert.doesNotMatch(chatUiSource, /shouldAnalyzeQuickReplyIntent|IMAGE_ANALYSIS_DECISION_SYSTEM_PROMPT|detectOverpromiseRisk/);
 
     console.log('ai context and prompt tests passed');
 })().catch(error => {

@@ -7,8 +7,6 @@ window.AgentPolicyManager = (function () {
     const DEFAULT_TTL_MS = 6 * 60 * 60 * 1000;
     const MAX_ADDENDUM_CHARS = 3000;
     const MAX_PROMPT_CHARS = 1200;
-    const MAX_PHRASES = 40;
-    const MAX_PHRASE_CHARS = 80;
 
     let inMemoryPolicy = null;
 
@@ -19,13 +17,6 @@ window.AgentPolicyManager = (function () {
 
     function normalizePolicy(raw, fallback = {}) {
         const ttlHours = Number(raw?.ttlHours);
-        const forbiddenPhrases = Array.isArray(raw?.forbiddenPhrases)
-            ? raw.forbiddenPhrases
-                .map(item => trimString(item, MAX_PHRASE_CHARS))
-                .filter(Boolean)
-                .slice(0, MAX_PHRASES)
-            : (fallback.forbiddenPhrases || []);
-
         return {
             version: trimString(raw?.version, 80) || fallback.version || 'bundled',
             remoteUrl: trimString(fallback.remoteUrl || raw?.remoteUrl, 300),
@@ -33,8 +24,7 @@ window.AgentPolicyManager = (function () {
                 ? ttlHours
                 : (fallback.ttlHours || 6),
             systemAddendum: trimString(raw?.systemAddendum, MAX_ADDENDUM_CHARS) || fallback.systemAddendum || '',
-            suggestResponsePrompt: trimString(raw?.suggestResponsePrompt, MAX_PROMPT_CHARS) || fallback.suggestResponsePrompt || '',
-            forbiddenPhrases
+            suggestResponsePrompt: trimString(raw?.suggestResponsePrompt, MAX_PROMPT_CHARS) || fallback.suggestResponsePrompt || ''
         };
     }
 
@@ -60,12 +50,13 @@ window.AgentPolicyManager = (function () {
         }
     }
 
-    async function saveCachedPolicy(policy) {
+    async function saveCachedPolicy(policy, bundledVersion) {
         try {
             if (!chrome.runtime?.id) return;
             await chrome.storage.local.set({
                 [STORAGE_KEY]: {
                     policy,
+                    bundledVersion,
                     fetchedAt: Date.now()
                 }
             });
@@ -85,7 +76,7 @@ window.AgentPolicyManager = (function () {
         const ttlMs = (bundled.ttlHours || 6) * 60 * 60 * 1000 || DEFAULT_TTL_MS;
         const cached = await loadCachedPolicy();
 
-        if (!options.forceRefresh && isFresh(cached, ttlMs)) {
+        if (!options.forceRefresh && isFresh(cached, ttlMs) && cached.bundledVersion === bundled.version) {
             inMemoryPolicy = normalizePolicy(cached.policy, bundled);
             return inMemoryPolicy;
         }
@@ -98,12 +89,13 @@ window.AgentPolicyManager = (function () {
         try {
             // Only the bundled URL controls where remote policy is loaded from.
             const remote = normalizePolicy(await fetchJson(bundled.remoteUrl), bundled);
-            await saveCachedPolicy(remote);
+            await saveCachedPolicy(remote, bundled.version);
             inMemoryPolicy = remote;
             return inMemoryPolicy;
         } catch (error) {
             console.warn('AgentPolicyManager: remote policy unavailable, using fallback', error);
-            inMemoryPolicy = cached?.policy ? normalizePolicy(cached.policy, bundled) : bundled;
+            const compatibleCache = cached?.bundledVersion === bundled.version ? cached.policy : null;
+            inMemoryPolicy = compatibleCache ? normalizePolicy(compatibleCache, bundled) : bundled;
             return inMemoryPolicy;
         }
     }
@@ -118,16 +110,10 @@ window.AgentPolicyManager = (function () {
         return policy.suggestResponsePrompt || fallbackPrompt;
     }
 
-    async function getForbiddenPhrases() {
-        const policy = await getPolicy();
-        return policy.forbiddenPhrases || [];
-    }
-
     return {
         STORAGE_KEY,
         getPolicy,
         buildSystemAddendum,
-        getSuggestResponsePrompt,
-        getForbiddenPhrases
+        getSuggestResponsePrompt
     };
 })();

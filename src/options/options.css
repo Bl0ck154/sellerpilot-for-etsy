@@ -246,6 +246,40 @@ main {
     color: #aaa;
 }
 
+.custom-provider-form {
+    display: grid;
+    gap: 10px;
+}
+
+.custom-provider-form > label:not(.custom-provider-toggle) {
+    margin-top: 4px;
+    color: #333;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.custom-provider-toggle {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-weight: 600;
+}
+
+.custom-provider-note,
+.custom-provider-status {
+    color: #5f6368;
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.custom-provider-status[data-state="error"] {
+    color: #b3261e;
+}
+
+.custom-provider-status[data-state="success"] {
+    color: #137333;
+}
+
 /* Textarea */
 .textarea-with-reset {
     margin-top: 12px;

@@ -5,6 +5,13 @@ const geminiApiKeyInput = document.getElementById('geminiApiKeyInput');
 const deepseekApiKeyInput = document.getElementById('deepseekApiKeyInput');
 const grokApiKeyInput = document.getElementById('grokApiKeyInput');
 const openrouterApiKeyInput = document.getElementById('openrouterApiKeyInput');
+const customProviderEnabled = document.getElementById('customProviderEnabled');
+const customBaseUrlInput = document.getElementById('customBaseUrlInput');
+const customApiKeyInput = document.getElementById('customApiKeyInput');
+const customModelInput = document.getElementById('customModelInput');
+const customFallbackProvider = document.getElementById('customFallbackProvider');
+const customProviderSaveBtn = document.getElementById('customProviderSaveBtn');
+const customProviderStatus = document.getElementById('customProviderStatus');
 const customInstructionsTextarea = document.getElementById('customInstructions');
 const chatManagerToggle = document.getElementById('chatManagerToggle');
 const statusElement = document.getElementById('status');
@@ -53,6 +60,11 @@ function showStatus(message) {
     }, 2000);
 }
 
+function setFallbackAvailability(providerId, available) {
+    const option = Array.from(customFallbackProvider.options).find(item => item.value === providerId);
+    if (option) option.disabled = !available;
+}
+
 // Toggle API key visibility for all inputs
 document.querySelectorAll('.toggle-visibility-btn').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -63,10 +75,12 @@ document.querySelectorAll('.toggle-visibility-btn').forEach(btn => {
             input.type = 'text';
             btn.textContent = '🙈';
             btn.title = 'Hide API Key';
+            btn.setAttribute('aria-pressed', 'true');
         } else {
             input.type = 'password';
             btn.textContent = '👁️';
             btn.title = 'Show API Key';
+            btn.setAttribute('aria-pressed', 'false');
         }
     });
 });
@@ -111,13 +125,11 @@ async function loadSettings() {
 
     // Load custom instructions
     chrome.storage.local.get(['custom_instructions'], (result) => {
-        const baseInstruction = getBaseInstruction();
-
         if (result.custom_instructions && result.custom_instructions.trim()) {
             customInstructionsTextarea.value = result.custom_instructions;
             console.log('📖 Loaded custom instructions (user modified)');
         } else {
-            customInstructionsTextarea.value = baseInstruction;
+            customInstructionsTextarea.value = '';
             console.log('📖 Loaded default instructions from code');
         }
     });
@@ -139,6 +151,7 @@ async function loadSettings() {
 // Save API keys
 function saveGeminiApiKey() {
     const apiKey = geminiApiKeyInput.value.trim();
+    setFallbackAvailability('gemini', Boolean(apiKey));
     chrome.storage.local.set({ gemini_api_key: apiKey }, () => {
         console.log('💾 Gemini API key saved');
         showStatus('Gemini API Key saved');
@@ -147,6 +160,7 @@ function saveGeminiApiKey() {
 
 function saveDeepSeekApiKey() {
     const apiKey = deepseekApiKeyInput.value.trim();
+    setFallbackAvailability('deepseek', Boolean(apiKey));
     chrome.storage.local.set({ deepseek_api_key: apiKey }, () => {
         console.log('💾 DeepSeek API key saved');
         showStatus('DeepSeek API Key saved');
@@ -155,6 +169,7 @@ function saveDeepSeekApiKey() {
 
 function saveGrokApiKey() {
     const apiKey = grokApiKeyInput.value.trim();
+    setFallbackAvailability('grok', Boolean(apiKey));
     chrome.storage.local.set({ grok_api_key: apiKey }, () => {
         console.log('💾 Grok API key saved');
         showStatus('Grok API Key saved');
@@ -169,12 +184,85 @@ function saveOpenRouterApiKey() {
     });
 }
 
+function setCustomProviderStatus(message, state = '') {
+    customProviderStatus.textContent = message;
+    if (state) customProviderStatus.dataset.state = state;
+    else delete customProviderStatus.dataset.state;
+}
+
+function validateCustomProviderUrl(value) {
+    let url;
+    try { url = new URL(value); }
+    catch (_) { throw new Error('Enter a valid provider URL.'); }
+
+    const localHost = ['localhost', '127.0.0.1', '::1'].includes(url.hostname);
+    if (url.protocol !== 'https:' && !(url.protocol === 'http:' && localHost)) {
+        throw new Error('Use HTTPS. Plain HTTP is allowed only for a local server.');
+    }
+    if (url.username || url.password) throw new Error('Do not put credentials in the URL.');
+    if (url.search || url.hash) throw new Error('The provider URL cannot contain a query or fragment.');
+    return url;
+}
+
+async function saveCustomProvider() {
+    const enabled = customProviderEnabled.checked;
+    const baseUrl = customBaseUrlInput.value.trim();
+    const apiKey = customApiKeyInput.value.trim();
+    const model = customModelInput.value.trim();
+    const fallbackProvider = customFallbackProvider.value || 'none';
+    setCustomProviderStatus('');
+
+    let parsedUrl = null;
+    try {
+        if (enabled || baseUrl) parsedUrl = validateCustomProviderUrl(baseUrl);
+        if (enabled && !model) throw new Error('Enter the model ID.');
+        const fallbackOption = customFallbackProvider.selectedOptions[0];
+        if (enabled && fallbackProvider !== 'none' && fallbackOption?.disabled) {
+            throw new Error(`Configure the ${fallbackOption.textContent} API key before selecting it as fallback.`);
+        }
+    } catch (error) {
+        setCustomProviderStatus(error.message, 'error');
+        return;
+    }
+
+    customProviderSaveBtn.disabled = true;
+    try {
+        const previous = await chrome.storage.local.get(['custom_base_url']);
+        if (enabled && parsedUrl) {
+            const granted = await chrome.permissions.request({ origins: [`${parsedUrl.origin}/*`] });
+            if (!granted) throw new Error('Host access was not granted. The custom provider was not enabled.');
+        }
+
+        await chrome.storage.local.set({
+            custom_provider_enabled: enabled,
+            custom_base_url: baseUrl.replace(/\/+$/, ''),
+            custom_api_key: apiKey,
+            custom_model: model,
+            custom_fallback_provider: fallbackProvider
+        });
+
+        if (previous.custom_base_url) {
+            try {
+                const oldOrigin = new URL(previous.custom_base_url).origin;
+                if (!enabled || !parsedUrl || oldOrigin !== parsedUrl.origin) {
+                    await chrome.permissions.remove({ origins: [`${oldOrigin}/*`] });
+                }
+            } catch (_) { /* Ignore invalid legacy configuration. */ }
+        }
+        setCustomProviderStatus(enabled ? 'Custom provider saved and enabled.' : 'Custom provider settings saved (disabled).', 'success');
+        showStatus('Custom provider settings saved');
+    } catch (error) {
+        setCustomProviderStatus(error.message || String(error), 'error');
+    } finally {
+        customProviderSaveBtn.disabled = false;
+    }
+}
+
 // Save custom instructions
 function saveCustomInstructions() {
     const instructions = customInstructionsTextarea.value.trim();
-    const baseInstruction = getBaseInstruction();
 
-    if (!instructions || instructions === baseInstruction) {
+    if (!instructions) {
         chrome.storage.local.remove('custom_instructions', () => {
             console.log('💾 Using default instructions (will auto-update)');
             showStatus('Using default instructions');
@@ -189,12 +277,11 @@ function saveCustomInstructions() {
 
 // Reset to default instructions
 function resetToDefault() {
-    const baseInstruction = getBaseInstruction();
-    customInstructionsTextarea.value = baseInstruction;
+    customInstructionsTextarea.value = '';
 
     chrome.storage.local.remove('custom_instructions', () => {
         console.log('🔄 Reset to default instructions');
-        showStatus('Reset to default instructions');
+        showStatus('Additional instructions cleared');
     });
 }
 
@@ -228,6 +315,7 @@ geminiApiKeyInput.addEventListener('blur', saveGeminiApiKey);
 deepseekApiKeyInput.addEventListener('blur', saveDeepSeekApiKey);
 grokApiKeyInput.addEventListener('blur', saveGrokApiKey);
 openrouterApiKeyInput.addEventListener('blur', saveOpenRouterApiKey);
+customProviderSaveBtn.addEventListener('click', saveCustomProvider);
 
 // Auto-save custom instructions with debounce
 const debouncedSaveInstructions = debounce(saveCustomInstructions, 1000);
@@ -485,16 +573,10 @@ async function deleteMemory(id) {
 async function addMemoryFromInput() {
     const text = memoryNewInput.value.trim();
     if (!text) return;
-    let res = await window.MemoryManager.addSmart(text);
+    const res = await window.MemoryManager.addSmart(text);
     if (!res) return;
-    if (res.conflict) {
-        const preview = res.conflicts.map((entry, index) => `${index + 1}. ${entry.text}`).join('\n');
-        const replace = confirm(`This may conflict with existing memory:\n\n${preview}\n\nSave it and replace the older conflicting memory?`);
-        if (!replace) return;
-        res = await window.MemoryManager.addSmart(text, { replaceConflicts: true });
-    }
     memoryNewInput.value = '';
-    showStatus(res.duplicate ? 'Already remembered' : (res.replaced?.length ? 'Memory added; older conflict replaced' : 'Memory added'));
+    showStatus(res.duplicate ? 'Already remembered' : 'Memory added');
     renderMemoryList();
 }
 
@@ -522,6 +604,21 @@ if (chrome?.storage?.onChanged) {
         if (namespace === 'local' && window.QuickReplyManager && changes[window.QuickReplyManager.STORAGE_KEY]) {
             renderQuickReplyList();
         }
+        for (const option of customFallbackProvider.options) {
+            if (option.value === 'none' || option.value === 'openrouter') continue;
+            option.disabled = !result[`${option.value}_api_key`];
+        }
+    });
+
+    chrome.storage.local.get([
+        'custom_provider_enabled', 'custom_base_url', 'custom_api_key',
+        'custom_model', 'custom_fallback_provider'
+    ], (result) => {
+        customProviderEnabled.checked = result.custom_provider_enabled === true;
+        customBaseUrlInput.value = result.custom_base_url || '';
+        customApiKeyInput.value = result.custom_api_key || '';
+        customModelInput.value = result.custom_model || '';
+        customFallbackProvider.value = result.custom_fallback_provider || 'none';
     });
 }
 

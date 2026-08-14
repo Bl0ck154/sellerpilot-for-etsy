@@ -86,6 +86,58 @@
                 </details>
             </section>
 
+            <section class="settings-section" id="custom-provider">
+                <div class="setting-item setting-item-vertical">
+                    <div class="setting-info">
+                        <h2>Custom AI provider</h2>
+                        <p class="description">
+                            Connect an OpenAI-compatible <code>/chat/completions</code> endpoint for the main assistant.
+                            The API key is stored locally in this browser profile. Gemini remains the engine for image
+                            quality analysis and long-context compression when its key is configured.
+                        </p>
+                    </div>
+                    <div class="custom-provider-form">
+                        <label class="custom-provider-toggle" for="customProviderEnabled">
+                            <input type="checkbox" id="customProviderEnabled">
+                            <span>Enable custom provider</span>
+                        </label>
+
+                        <label for="customBaseUrlInput">Base URL or full chat-completions URL</label>
+                        <input type="url" id="customBaseUrlInput" class="input-field"
+                            placeholder="https://provider.example/v1">
+
+                        <label for="customModelInput">Model ID</label>
+                        <input type="text" id="customModelInput" class="input-field"
+                            placeholder="model-name" autocomplete="off">
+
+                        <label for="customApiKeyInput">API key <small>(optional for local servers)</small></label>
+                        <div class="input-with-toggle">
+                            <input type="password" id="customApiKeyInput" class="input-field"
+                                placeholder="Bearer API key" autocomplete="off">
+                            <button type="button" class="toggle-visibility-btn" data-target="customApiKeyInput"
+                                aria-label="Show or hide custom provider API key"
+                                aria-controls="customApiKeyInput" aria-pressed="false">Show</button>
+                        </div>
+
+                        <label for="customFallbackProvider">Fallback if the custom provider fails before answering</label>
+                        <select id="customFallbackProvider" class="input-field">
+                            <option value="none">No fallback</option>
+                            <option value="gemini">Google Gemini</option>
+                            <option value="deepseek">DeepSeek</option>
+                            <option value="grok">Grok</option>
+                            <option value="openrouter">OpenRouter</option>
+                        </select>
+                        <p class="custom-provider-note">
+                            A fallback sends the same request and customer context to the selected second provider only
+                            when the custom endpoint fails before producing text. Cancellation never triggers fallback.
+                        </p>
+
+                        <button type="button" id="customProviderSaveBtn" class="reset-btn">Save provider and grant host access</button>
+                        <p id="customProviderStatus" class="custom-provider-status" role="status" aria-live="polite"></p>
+                    </div>
+                </div>
+            </section>
+
             <!-- Quick Replies Section -->
             <section class="settings-section" id="quick-replies">
                 <div class="setting-item setting-item-vertical">
@@ -147,19 +199,16 @@
             <section class="settings-section">
                 <div class="setting-item setting-item-vertical">
                     <div class="setting-info">
-                        <h2>📝 Custom AI Instructions</h2>
+                        <h2>Additional AI instructions</h2>
                         <p class="description">
-                            View and customize AI behavior instructions. Instructions auto-update when defaults change,
-                            unless you modify them.
-                            <br>
-                            <small>Click "Reset to Default" to restore original instructions and re-enable
-                                auto-updates.</small>
+                            Add shop-specific preferences without replacing the assistant's stable reasoning,
+                            context, role, and truth rules.
                         </p>
                     </div>
                     <div class="textarea-with-reset">
-                        <textarea id="customInstructions" class="textarea-field" placeholder="Loading instructions..."
+                        <textarea id="customInstructions" class="textarea-field" placeholder="Optional shop-specific preferences..."
                             rows="12"></textarea>
-                        <button type="button" id="resetInstructions" class="reset-btn">🔄 Reset to Default</button>
+                        <button type="button" id="resetInstructions" class="reset-btn">Clear additional instructions</button>
                     </div>
                 </div>
             </section>

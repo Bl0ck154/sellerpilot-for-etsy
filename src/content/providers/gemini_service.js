@@ -107,16 +107,10 @@ AI: ${aiResponse}`;
 
     _selectThinkingMode(messages, systemInstruction) {
         const promptChars = this._getPromptSize(messages, systemInstruction);
-        const lastUserMessage = [...messages].reverse().find(msg => msg.role === 'user')?.content || '';
-        const importantPattern = /важлив|термінов|urgent|important|strategy|стратег|аналіз|analy[sz]e|compare|порівняй|diagnos|чому|why|refund|case|dispute|скарг|negative review|відгук|тз|технічн|техническ|\bbrief\b|task for|specification/i;
-
-        if (promptChars > 18000 || messages.length > 14 || importantPattern.test(lastUserMessage)) {
+        if (promptChars > 60000 || messages.length > 18) {
             return 'deep';
         }
-        if (promptChars > 9000 || messages.length > 8) {
-            return 'balanced';
-        }
-        return 'fast';
+        return 'balanced';
     }
 
     _getThinkingConfig(thinkingMode, modelId = '') {

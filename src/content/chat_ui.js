@@ -417,26 +417,16 @@ function initChat() {
     let contextTransitionId = 0;
     let viewingLegacySession = false;
     let pendingMemorySuggestion = null;
-    let isAnalyzingMemoryIntent = false;
-    let isAnalyzingQuickReplyIntent = false;
+    let isAnalyzingManagementIntent = false;
     const MEMORY_ANALYSIS_TIMEOUT_MS = 3000;
-    const MEMORY_ANALYSIS_SYSTEM_PROMPT = `You classify whether the Owner is asking to use persistent assistant memory.
-Return ONLY compact JSON with this shape:
-{"action":"none|add|remove|clear|offer","text":"","keyword":"","confidence":0}
+    const MANAGEMENT_INTENT_SYSTEM_PROMPT = `Classify whether the Owner's latest turn is an explicit request to manage assistant memory or reusable Etsy quick replies.
+Return ONLY compact JSON:
+{"domain":"none|memory|quick_reply","action":"none|add|remove|clear|offer|list|update","text":"","keyword":"","target":"","label":"","confidence":0}
 
-Meanings:
-- add: the Owner clearly asks to save/remember a durable fact, shop policy, writing preference, workflow preference, or voice rule.
-- remove: the Owner clearly asks to forget/remove a memory.
-- clear: the Owner clearly asks to clear all memory.
-- offer: the Owner mentions a durable preference/policy that would be useful later, but does not clearly ask to save it. Ask for confirmation instead of saving automatically.
-- none: normal drafting/chat request, temporary instruction, one-off customer detail, or ambiguous.
-
-Rules:
-- Do not save one-off customer/order details as memory.
-- Do not save sensitive private data.
-- Prefer none when unsure.
-- For add/offer, put the memory-ready fact in text, written as a stable preference/policy.
-- For remove, put the smallest useful search phrase in keyword.`;
+Use semantic intent, not keyword matching. Normal drafting, rewriting, translation, analysis, and one-off customer/order details belong to domain=none.
+Memory is only for durable shop facts or preferences. Do not save sensitive data. Use offer when a durable preference may be useful but was not explicitly requested to be saved.
+Quick-reply actions apply only when the Owner intends to manage a reusable saved reply. Preserve supplied wording and do not invent missing template text.
+Prefer domain=none when the intent is ambiguous.`;
     const MEMORY_DECISION_SYSTEM_PROMPT = `You classify the Owner's reply to a pending memory confirmation.
 Return ONLY compact JSON with this shape:
 {"decision":"accept|reject|unclear","confidence":0}
@@ -447,23 +437,7 @@ Classify the Owner's latest message by meaning, not by exact words.
 - reject: they decline, cancel, say not to do it, or ask to keep memory unchanged.
 - unclear: anything else, including a new unrelated request or a question.
 Prefer unclear when unsure.`;
-    const QUICK_REPLY_ANALYSIS_SYSTEM_PROMPT = `You classify whether the Owner is asking to manage reusable Etsy quick replies.
-Return ONLY compact JSON with this shape:
-{"action":"none|list|add|update|remove","target":"","label":"","text":"","confidence":0}
-
-Meanings:
-- list: show the saved quick replies.
-- add: create a new quick reply. Put its short human-readable name in label and complete customer-facing reply in text.
-- update: edit or rename an existing quick reply. Put its current name/search phrase in target, its new name in label only if requested, and its complete new reply in text only if requested.
-- remove: delete one quick reply. Put its name/search phrase in target.
-- none: normal customer-reply drafting, translation, rewriting, chat, or anything not explicitly about managing saved quick replies.
-
-Rules:
-- A request to draft, suggest, write, improve, or translate a reply is NOT quick-reply management unless the Owner explicitly says to save/add/update/remove a reusable quick reply or template.
-- Never infer missing reply text for add/update.
-- Preserve the requested customer-facing language and wording.
-- Prefer none when unsure.`;
-    const DEFAULT_SUGGEST_RESPONSE_PROMPT = "Draft a customer reply based on the current Etsy conversation and page context. Write in the customer's language. Preserve my intended meaning and point of view: if I write as one person, draft as one person; if I write as a team/shop, draft as a team/shop. Use context to understand the situation, but do not add new facts, claims, next steps, or reassurance I did not ask for. Keep broad confirmations broad; be specific only when useful for the reply I requested. Never ask for photos/details already provided. Avoid unsupported promises about exact results, timing, price, refunds, or outcomes. If I ask for a beautiful, polite, warm, or more detailed reply, make it naturally fuller instead of overly short.";
+    const DEFAULT_SUGGEST_RESPONSE_PROMPT = "Draft the reply the Owner is asking for from the available Etsy conversation and page context. Preserve the Owner's meaning, point of view, scope, and level of certainty. Use the customer's language unless another language was requested. Do not invent facts, commitments, questions, or next steps, and do not ask again for information already provided.";
     const QUICK_ACTIONS = [
         {
             id: 'suggest-reply',
@@ -533,6 +507,7 @@ Rules:
         clearDiagnosticsBtn: document.getElementById('clear-diagnostics'),
         diagnosticsCount: document.getElementById('diagnostics-count'),
         customInstructionsWarning: document.getElementById('custom-instructions-warning'),
+        openAdvancedSettingsBtn: document.getElementById('open-advanced-settings'),
         // History
         historyBtn: document.getElementById('history-btn'),
         newChatBtn: document.getElementById('new-chat-btn'),
@@ -599,7 +574,11 @@ Rules:
         }
 
         // 2. Load API keys from Storage - now checking all providers
-        const result = await safeStorageGet(['selected_provider', 'gemini_api_key', 'deepseek_api_key', 'grok_api_key', 'openrouter_api_key', 'preferred_model']);
+        const result = await safeStorageGet([
+            'selected_provider', 'preferred_model',
+            'gemini_api_key', 'deepseek_api_key', 'grok_api_key', 'openrouter_api_key',
+            'custom_provider_enabled', 'custom_base_url', 'custom_api_key', 'custom_model', 'custom_fallback_provider'
+        ]);
         if (!result) {
             // Extension context invalidated - storage unavailable
             console.error('⚠️ Storage unavailable - extension context may be invalid');
@@ -612,7 +591,14 @@ Rules:
             gemini: result.gemini_api_key || null,
             deepseek: result.deepseek_api_key || null,
             grok: result.grok_api_key || null,
-            openrouter: result.openrouter_api_key || null
+            openrouter: result.openrouter_api_key || null,
+            custom: result.custom_api_key || null
+        };
+        const customSettings = {
+            enabled: result.custom_provider_enabled === true,
+            baseUrl: String(result.custom_base_url || '').trim(),
+            model: String(result.custom_model || '').trim(),
+            fallbackProvider: String(result.custom_fallback_provider || 'none')
         };
 
         if (result.gemini_api_key) {
@@ -620,17 +606,22 @@ Rules:
         }
 
         // OpenRouter always has a built-in key — always counts as having an available provider
-        const hasAnyKey = PROVIDERS_WITH_BUILTIN_KEY.size > 0 ||
+        const customReady = customSettings.enabled && customSettings.baseUrl && customSettings.model;
+        const hasAnyKey = PROVIDERS_WITH_BUILTIN_KEY.size > 0 || customReady ||
             Object.values(availableKeys).some(key => key && key.trim());
 
         // Repopulate with key info available (to filter out providers without keys)
-        populateModelDropdown(availableKeys);
+        populateModelDropdown(availableKeys, customSettings);
 
         // Restore previously selected model if it exists in the current dropdown
         if (result.preferred_model) {
-            ELEMENTS.modelSelect.value = result.preferred_model;
-            // If value didn't match any option, fall through to detection below
-            if (ELEMENTS.modelSelect.value !== result.preferred_model) {
+            const restoredOption = Array.from(ELEMENTS.modelSelect.options).find(option =>
+                option.value === result.preferred_model &&
+                (!result.selected_provider || option.dataset.provider === result.selected_provider)
+            );
+            if (restoredOption) {
+                restoredOption.selected = true;
+            } else {
                 // Stored model not in dropdown (provider removed/no key) — pick a default
                 result.preferred_model = null;
             }
@@ -657,6 +648,10 @@ Rules:
                 }
             }
 
+            if (!selectedModel && customReady) {
+                selectedModel = `custom::${customSettings.model}`;
+            }
+
             // Fallback to default provider's model if none found
             if (!selectedModel && window.ETSY_AI_CONFIG?.defaultProvider) {
                 const defaultProvider = window.ETSY_AI_CONFIG.providers.find(p => p.id === window.ETSY_AI_CONFIG.defaultProvider);
@@ -667,7 +662,11 @@ Rules:
 
             if (selectedModel) {
                 ELEMENTS.modelSelect.value = selectedModel;
-                await safeStorageSet({ 'preferred_model': selectedModel });
+                const selectedOption = ELEMENTS.modelSelect.options[ELEMENTS.modelSelect.selectedIndex];
+                await safeStorageSet({
+                    preferred_model: selectedModel,
+                    selected_provider: selectedOption?.dataset.provider || window.ETSY_AI_CONFIG?.defaultProvider || 'gemini'
+                });
             }
         }
 
@@ -680,8 +679,13 @@ Rules:
 
     // Providers that always work without a user-supplied key (have a built-in key)
     const PROVIDERS_WITH_BUILTIN_KEY = new Set(['openrouter']);
+    const PROVIDERS_WITH_OPTIONAL_KEY = new Set(['custom']);
 
-    function populateModelDropdown(availableKeys = {}) {
+    function providerRequiresApiKey(providerId) {
+        return !PROVIDERS_WITH_BUILTIN_KEY.has(providerId) && !PROVIDERS_WITH_OPTIONAL_KEY.has(providerId);
+    }
+
+    function populateModelDropdown(availableKeys = {}, customSettings = {}) {
         ELEMENTS.modelSelect.innerHTML = "";
 
         if (!window.ETSY_AI_CONFIG?.providers) return;
@@ -698,6 +702,7 @@ Rules:
                 const option = document.createElement('option');
                 option.value = model.id;
                 option.dataset.provider = provider.id;
+                option.dataset.model = model.id;
                 option.textContent = `${provider.name} — ${model.name}`;
                 ELEMENTS.modelSelect.appendChild(option);
             } else {
@@ -708,12 +713,22 @@ Rules:
                     const option = document.createElement('option');
                     option.value = model.id;
                     option.dataset.provider = provider.id;
+                    option.dataset.model = model.id;
                     option.textContent = model.name;
                     group.appendChild(option);
                 });
                 ELEMENTS.modelSelect.appendChild(group);
             }
         });
+
+        if (customSettings.enabled && customSettings.baseUrl && customSettings.model) {
+            const option = document.createElement('option');
+            option.value = `custom::${customSettings.model}`;
+            option.dataset.provider = 'custom';
+            option.dataset.model = customSettings.model;
+            option.textContent = `Custom provider — ${customSettings.model}`;
+            ELEMENTS.modelSelect.appendChild(option);
+        }
 
         // Sync CONFIG.models for backward compat (used elsewhere)
         CONFIG.models = [];
@@ -722,6 +737,9 @@ Rules:
                 CONFIG.models.push({ id: model.id, name: model.name, provider: provider.id });
             });
         });
+        if (customSettings.enabled && customSettings.model) {
+            CONFIG.models.push({ id: customSettings.model, name: customSettings.model, provider: 'custom' });
+        }
     }
 
     // --- LISTENERS ---
@@ -775,6 +793,7 @@ Rules:
         ELEMENTS.saveSettingsBtn.addEventListener('click', saveSettings);
         ELEMENTS.copyDiagnosticsBtn?.addEventListener('click', copyDiagnosticsToClipboard);
         ELEMENTS.clearDiagnosticsBtn?.addEventListener('click', clearDiagnostics);
+        ELEMENTS.openAdvancedSettingsBtn?.addEventListener('click', () => chrome.runtime.openOptionsPage());
         document.getElementById('cancel-settings').addEventListener('click', closeSettings);
 
         // Close on overlay click (mousedown для точності)
@@ -797,17 +816,21 @@ Rules:
             if (namespace === 'local' && changes.custom_instructions) {
                 updateCustomInstructionsWarning(changes.custom_instructions.newValue);
             }
+            if (namespace === 'local' && [
+                'custom_provider_enabled', 'custom_base_url', 'custom_api_key',
+                'custom_model', 'custom_fallback_provider'
+            ].some(key => changes[key])) {
+                loadConfiguration().catch(error => console.warn('Failed to reload provider configuration', error));
+            }
         });
 
         ELEMENTS.modelSelect.addEventListener('change', async () => {
             const selectedModelId = ELEMENTS.modelSelect.value;
-            await safeStorageSet({ 'preferred_model': selectedModelId });
-
-            // Check if selected model has API key — skip for providers with built-in key
             const selectedOption = ELEMENTS.modelSelect.options[ELEMENTS.modelSelect.selectedIndex];
             const providerId = selectedOption ? selectedOption.dataset.provider : null;
+            await safeStorageSet({ preferred_model: selectedModelId, selected_provider: providerId });
 
-            if (providerId && !PROVIDERS_WITH_BUILTIN_KEY.has(providerId)) {
+            if (providerId && providerRequiresApiKey(providerId)) {
                 const apiKey = await window.AIServiceFactory.getApiKey(providerId);
 
                 if (!apiKey || !apiKey.trim()) {
@@ -853,6 +876,12 @@ Rules:
     }
 
     async function openSettingsForProvider(providerId) {
+        if (providerId === 'custom') {
+            chrome.runtime.openOptionsPage?.();
+            addMessage('Configure the custom provider in the extension Settings page.', 'system');
+            return;
+        }
+
         // Load all API keys
         const result = await safeStorageGet(['gemini_api_key', 'deepseek_api_key', 'grok_api_key', 'custom_instructions']);
 
@@ -912,6 +941,9 @@ Rules:
                 : action.prompt;
             handleChatInteraction(prompt, action.systemAction);
         });
+        if (customSettings.enabled && customSettings.model) {
+            CONFIG.models.push({ id: customSettings.model, name: customSettings.model, provider: 'custom' });
+        }
     }
 
     function toggleQuickActionsMenu() {
@@ -1313,8 +1345,8 @@ Rules:
         const selectedOption = ELEMENTS.modelSelect.options[ELEMENTS.modelSelect.selectedIndex];
         const provider = selectedOption ? selectedOption.dataset.provider : "gemini";
 
-        // Get API key for the provider (skip check for providers with built-in key)
-        if (!PROVIDERS_WITH_BUILTIN_KEY.has(provider)) {
+        // Custom endpoints may intentionally run without authentication.
+        if (providerRequiresApiKey(provider)) {
             try {
                 const apiKey = await window.AIServiceFactory.getApiKey(provider);
 
@@ -1392,23 +1424,32 @@ Rules:
             }
 
             // Get API key for the current provider
-            // For providers with built-in keys (e.g. OpenRouter), pass null — the service handles it internally
+            // Built-in-key and explicitly optional-key providers resolve credentials internally.
             let providerApiKey = null;
-            if (!PROVIDERS_WITH_BUILTIN_KEY.has(provider)) {
+            if (providerRequiresApiKey(provider)) {
                 providerApiKey = await window.AIServiceFactory.getApiKey(provider);
                 if (!providerApiKey) {
                     throw new Error(`No API key configured for provider: ${provider}`);
                 }
             }
 
-            const providerModelId = await window.AIServiceFactory.getModelId(provider);
+            const providerModelId = selectedOption?.dataset.model || await window.AIServiceFactory.getModelId(provider);
 
-            const imageIntelMetadata = isSystemAction && window.ImageIntelligenceManager
-                ? await window.ImageIntelligenceManager.analyzeCurrentCustomerImages({ onStatus: showAiStatus })
-                : (window.ImageIntelligenceManager ? window.ImageIntelligenceManager.getMetadata() : {});
-
-            // Build conversation history for this Etsy conversation only.
+            // Build scoped assistant history and make all customer image evidence available.
             const conversationHistory = await aiService.buildConversationHistory(requestStorageKeys.messagesKey, userMessageText);
+            let imageIntelMetadata = {};
+            if (window.ImageIntelligenceManager) {
+                const analysisPromise = window.ImageIntelligenceManager
+                    .analyzeCurrentCustomerImages({ onStatus: showAiStatus });
+                imageIntelMetadata = await Promise.race([
+                    analysisPromise,
+                    new Promise(resolve => setTimeout(() => {
+                        showAiStatus('Image analysis continues in the background...');
+                        resolve(window.ImageIntelligenceManager.getMetadata());
+                    }, 6000))
+                ]);
+            }
+
             const { systemInstruction } = await aiService.constructPromptData(requestContext, userMessageText);
             const promptMetadata = BaseAIService.INSTRUCTIONS.lastBuildMetadata || {};
             const shopIntelMetadata = window.ShopIntelligenceManager
@@ -1503,32 +1544,17 @@ Rules:
         }
 
         // Don't send if already processing
-        if (isProcessing || isAnalyzingMemoryIntent || isAnalyzingQuickReplyIntent) {
+        if (isProcessing || isAnalyzingManagementIntent) {
             return; // Keep text in input, don't clear
-        }
-
-        let quickReplyIntent = null;
-        isAnalyzingQuickReplyIntent = true;
-        try {
-            quickReplyIntent = await analyzeQuickReplyIntentIfUseful(text);
-        } finally {
-            isAnalyzingQuickReplyIntent = false;
-        }
-        if (quickReplyIntent?.action && quickReplyIntent.action !== 'none') {
-            const handled = await handleQuickReplyIntent(text, quickReplyIntent);
-            if (handled) {
-                ELEMENTS.userInput.innerText = "";
-                return;
-            }
         }
 
         if (pendingMemorySuggestion) {
             let pendingMemoryDecision = null;
-            isAnalyzingMemoryIntent = true;
+            isAnalyzingManagementIntent = true;
             try {
                 pendingMemoryDecision = await analyzePendingMemoryDecision(text);
             } finally {
-                isAnalyzingMemoryIntent = false;
+                isAnalyzingManagementIntent = false;
             }
             if (pendingMemoryDecision?.decision === 'accept' || pendingMemoryDecision?.decision === 'reject') {
                 ELEMENTS.userInput.innerText = "";
@@ -1540,15 +1566,22 @@ Rules:
             }
         }
 
-        let memoryIntent = null;
-        isAnalyzingMemoryIntent = true;
+        let managementIntent = null;
+        isAnalyzingManagementIntent = true;
         try {
-            memoryIntent = await analyzeMemoryIntentIfUseful(text);
+            managementIntent = await analyzeManagementIntent(text);
         } finally {
-            isAnalyzingMemoryIntent = false;
+            isAnalyzingManagementIntent = false;
         }
-        if (memoryIntent?.action && memoryIntent.action !== 'none') {
-            const handled = await handleMemoryIntent(text, memoryIntent);
+
+        if (managementIntent?.domain === 'quick_reply') {
+            const handled = await handleQuickReplyIntent(text, managementIntent);
+            if (handled) {
+                ELEMENTS.userInput.innerText = "";
+                return;
+            }
+        } else if (managementIntent?.domain === 'memory') {
+            const handled = await handleMemoryIntent(text, managementIntent);
             if (handled) {
                 ELEMENTS.userInput.innerText = "";
                 return;
@@ -1558,32 +1591,26 @@ Rules:
         handleChatInteraction(text);
     }
 
-    function shouldAnalyzeQuickReplyIntent(text) {
-        if (!window.QuickReplyManager || !text) return false;
-        return /\bquick\s*repl(?:y|ies)\b|\bcanned\s*(?:reply|response)\b|\breply\s*template\b|\btemplate\s*(?:reply|response)\b|швидк[\p{L}\p{N}_]*\s+відповід[\p{L}\p{N}_]*|шаблон[\p{L}\p{N}_]*\s+(?:відповід[\p{L}\p{N}_]*|повідомлен[\p{L}\p{N}_]*)|быстр[\p{L}\p{N}_]*\s+ответ[\p{L}\p{N}_]*|шаблон[\p{L}\p{N}_]*\s+(?:ответ[\p{L}\p{N}_]*|сообщен[\p{L}\p{N}_]*)/iu.test(text);
-    }
-
-    async function analyzeQuickReplyIntentIfUseful(text) {
-        if (!shouldAnalyzeQuickReplyIntent(text)) return null;
-
+    async function analyzeManagementIntent(text) {
+        if (!text || (!window.MemoryManager && !window.QuickReplyManager)) return null;
         try {
             const selectedOption = ELEMENTS.modelSelect.options[ELEMENTS.modelSelect.selectedIndex];
             const provider = selectedOption ? selectedOption.dataset.provider : 'gemini';
             let providerApiKey = null;
-            if (!PROVIDERS_WITH_BUILTIN_KEY.has(provider)) {
+            if (providerRequiresApiKey(provider)) {
                 providerApiKey = await window.AIServiceFactory.getApiKey(provider);
                 if (!providerApiKey) return null;
             }
 
             const service = await window.AIServiceFactory.getCurrentService(provider);
-            const providerModelId = await window.AIServiceFactory.getModelId(provider);
+            const providerModelId = selectedOption?.dataset.model || await window.AIServiceFactory.getModelId(provider);
             let raw = '';
             const controller = new AbortController();
             let timeoutId = null;
             const classificationPromise = service.streamMessage({
                 modelId: providerModelId,
                 apiKey: providerApiKey,
-                systemInstruction: QUICK_REPLY_ANALYSIS_SYSTEM_PROMPT,
+                systemInstruction: MANAGEMENT_INTENT_SYSTEM_PROMPT,
                 messages: [{ role: 'user', content: text }],
                 onChunk: (_chunk, fullText) => { raw = fullText || raw; },
                 onComplete: (fullText) => { raw = fullText || raw; },
@@ -1597,7 +1624,7 @@ Rules:
                     new Promise((_, reject) => {
                         timeoutId = setTimeout(() => {
                             controller.abort();
-                            reject(new Error('quick reply analysis timeout'));
+                            reject(new Error('management intent analysis timeout'));
                         }, MEMORY_ANALYSIS_TIMEOUT_MS);
                     })
                 ]);
@@ -1605,28 +1632,38 @@ Rules:
                 if (timeoutId) clearTimeout(timeoutId);
             }
 
-            return parseQuickReplyIntentJson(raw);
+            return parseManagementIntentJson(raw);
         } catch (error) {
-            console.debug('Quick reply intent analysis skipped:', error?.message || error);
+            console.debug('Management intent analysis skipped:', error?.message || error);
             return null;
         }
     }
 
-    function parseQuickReplyIntentJson(raw) {
+    function parseManagementIntentJson(raw) {
         if (!raw) return null;
         const text = String(raw).replace(/```json|```/gi, '').trim();
         const match = text.match(/\{[\s\S]*\}/);
         if (!match) return null;
         try {
             const parsed = JSON.parse(match[0]);
+            const domain = String(parsed.domain || 'none').toLowerCase();
             const action = String(parsed.action || 'none').toLowerCase();
             const confidence = Number(parsed.confidence) || 0;
-            if (!['none', 'list', 'add', 'update', 'remove'].includes(action)) return null;
+            if (!['none', 'memory', 'quick_reply'].includes(domain)) return null;
+            if (!['none', 'add', 'remove', 'clear', 'offer', 'list', 'update'].includes(action)) return null;
+            const validForDomain = domain === 'none'
+                ? action === 'none'
+                : domain === 'memory'
+                    ? ['add', 'remove', 'clear', 'offer'].includes(action)
+                    : ['add', 'remove', 'list', 'update'].includes(action);
+            if (!validForDomain) return null;
             return {
+                domain: confidence >= 0.6 ? domain : 'none',
                 action: confidence >= 0.6 ? action : 'none',
                 target: String(parsed.target || '').trim().slice(0, 120),
                 label: String(parsed.label || '').trim().slice(0, 48),
                 text: String(parsed.text || '').trim().slice(0, 1500),
+                keyword: String(parsed.keyword || '').trim().slice(0, 120),
                 confidence
             };
         } catch (_) {
@@ -1698,62 +1735,6 @@ Rules:
         return true;
     }
 
-    function shouldAnalyzeMemoryIntent(text) {
-        if (!window.MemoryManager || !text) return false;
-        const normalized = String(text).toLowerCase();
-        if (normalized.length < 8) return false;
-        return true;
-    }
-
-    async function analyzeMemoryIntentIfUseful(text) {
-        if (!shouldAnalyzeMemoryIntent(text)) return null;
-
-        try {
-            const selectedOption = ELEMENTS.modelSelect.options[ELEMENTS.modelSelect.selectedIndex];
-            const provider = selectedOption ? selectedOption.dataset.provider : 'gemini';
-            let providerApiKey = null;
-            if (!PROVIDERS_WITH_BUILTIN_KEY.has(provider)) {
-                providerApiKey = await window.AIServiceFactory.getApiKey(provider);
-                if (!providerApiKey) return null;
-            }
-
-            const service = await window.AIServiceFactory.getCurrentService(provider);
-            const providerModelId = await window.AIServiceFactory.getModelId(provider);
-            let raw = '';
-            const controller = new AbortController();
-            let timeoutId = null;
-            const classificationPromise = service.streamMessage({
-                modelId: providerModelId,
-                apiKey: providerApiKey,
-                systemInstruction: MEMORY_ANALYSIS_SYSTEM_PROMPT,
-                messages: [{ role: 'user', content: text }],
-                onChunk: (_chunk, fullText) => { raw = fullText || raw; },
-                onComplete: (fullText) => { raw = fullText || raw; },
-                onError: () => { },
-                abortSignal: controller.signal
-            });
-
-            try {
-                await Promise.race([
-                    classificationPromise,
-                    new Promise((_, reject) => {
-                        timeoutId = setTimeout(() => {
-                            controller.abort();
-                            reject(new Error('memory analysis timeout'));
-                        }, MEMORY_ANALYSIS_TIMEOUT_MS);
-                    })
-                ]);
-            } finally {
-                if (timeoutId) clearTimeout(timeoutId);
-            }
-
-            return parseMemoryIntentJson(raw);
-        } catch (error) {
-            console.debug('Memory intent analysis skipped:', error?.message || error);
-            return null;
-        }
-    }
-
     async function analyzePendingMemoryDecision(text) {
         if (!pendingMemorySuggestion || !text || !window.MemoryManager) return null;
 
@@ -1761,13 +1742,13 @@ Rules:
             const selectedOption = ELEMENTS.modelSelect.options[ELEMENTS.modelSelect.selectedIndex];
             const provider = selectedOption ? selectedOption.dataset.provider : 'gemini';
             let providerApiKey = null;
-            if (!PROVIDERS_WITH_BUILTIN_KEY.has(provider)) {
+            if (providerRequiresApiKey(provider)) {
                 providerApiKey = await window.AIServiceFactory.getApiKey(provider);
                 if (!providerApiKey) return null;
             }
 
             const service = await window.AIServiceFactory.getCurrentService(provider);
-            const providerModelId = await window.AIServiceFactory.getModelId(provider);
+            const providerModelId = selectedOption?.dataset.model || await window.AIServiceFactory.getModelId(provider);
             let raw = '';
             const controller = new AbortController();
             let timeoutId = null;
@@ -1804,26 +1785,6 @@ Rules:
             return parseMemoryDecisionJson(raw);
         } catch (error) {
             console.debug('Memory decision analysis skipped:', error?.message || error);
-            return null;
-        }
-    }
-
-    function parseMemoryIntentJson(raw) {
-        if (!raw) return null;
-        const text = String(raw).replace(/```json|```/gi, '').trim();
-        const match = text.match(/\{[\s\S]*\}/);
-        if (!match) return null;
-        try {
-            const parsed = JSON.parse(match[0]);
-            const action = String(parsed.action || 'none').toLowerCase();
-            if (!['none', 'add', 'remove', 'clear', 'offer'].includes(action)) return null;
-            return {
-                action,
-                text: String(parsed.text || '').trim().slice(0, 500),
-                keyword: String(parsed.keyword || '').trim().slice(0, 120),
-                confidence: Number(parsed.confidence) || 0
-            };
-        } catch (_) {
             return null;
         }
     }
@@ -1865,11 +1826,6 @@ Rules:
                 const res = await window.MemoryManager.addSmart(intent.text);
                 if (!res) reply = "⚠️ Could not save an empty memory.";
                 else if (res.duplicate) reply = `ℹ️ Already remembered: "${res.entry.text}"`;
-                else if (res.conflict) {
-                    pendingMemorySuggestion = { text: res.text, conflicts: res.conflicts, source: 'explicit_add' };
-                    reply = `This may conflict with existing memory:\n${formatMemoryEntries(res.conflicts)}\n\nSave it and replace the older conflicting memory? Reply with your choice.`;
-                }
-                else if (res.replaced?.length) reply = `💾 Remembered and replaced older memory: "${res.entry.text}"`;
                 else reply = `💾 Remembered: "${res.entry.text}"`;
             } else if (intent.action === 'remove') {
                 const res = await window.MemoryManager.removeByKeyword(intent.keyword || intent.text);
@@ -1916,11 +1872,9 @@ Rules:
             await window.MemoryManager.clear();
             reply = '🗑️ All memory cleared.';
         } else if (pending?.text) {
-            const res = await window.MemoryManager.addSmart(pending.text, { replaceConflicts: true });
+            const res = await window.MemoryManager.addSmart(pending.text);
             if (res?.entry) {
-                reply = res.replaced?.length
-                    ? `💾 Remembered and replaced ${res.replaced.length} older conflicting memory entry.`
-                    : `💾 Remembered: "${res.entry.text}"`;
+                reply = `💾 Remembered: "${res.entry.text}"`;
             } else {
                 reply = 'Memory unchanged.';
             }
@@ -2228,38 +2182,6 @@ Rules:
         };
     }
 
-    function escapeRegExp(value) {
-        return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    }
-
-    async function detectOverpromiseRisk(text, pageScope = '') {
-        if (!text || !String(pageScope).startsWith('messages')) return null;
-
-        const fallbackPhrases = [
-            'guarantee',
-            'we can make anything',
-            'exactly as you want',
-            'we will fix everything',
-            'we can recreate it exactly',
-            'turn out perfectly',
-            'unlimited revisions',
-            'I promise'
-        ];
-
-        const phrases = window.AgentPolicyManager
-            ? await window.AgentPolicyManager.getForbiddenPhrases()
-            : fallbackPhrases;
-
-        const matches = [];
-        for (const phrase of (phrases.length ? phrases : fallbackPhrases)) {
-            const pattern = new RegExp(escapeRegExp(phrase), 'i');
-            const match = text.match(pattern);
-            if (match) matches.push(match[0]);
-        }
-
-        return matches.length ? { matches: [...new Set(matches)].slice(0, 6) } : null;
-    }
-
     // Add error message with retry button
     function addErrorMessage(errorText, retryContext) {
         const classified = classifyAiError(errorText);
@@ -2532,12 +2454,6 @@ Rules:
                 timestamp.innerText = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
                 aiMsgDiv.appendChild(timestamp);
 
-                const overpromiseRisk = await detectOverpromiseRisk(finalText, diagnosticBase.pageScope || '');
-                if (!isRequestScopeActive()) return;
-                if (overpromiseRisk) {
-                    addMessage(`Warning: this draft may overpromise (${overpromiseRisk.matches.join(', ')}). Review before sending or ask me to make it more cautious.`, 'system');
-                }
-
                 // Save to global chat storage
                 await saveChatToStorage(finalText, "ai", storageKeys);
                 if (!isRequestScopeActive()) return;
@@ -2588,7 +2504,6 @@ Rules:
                 durationMs: Date.now() - startedAt,
                 ok: true,
                 responseChars: finalText.length,
-                overpromiseRisk: await detectOverpromiseRisk(finalText, diagnosticBase.pageScope || ''),
                 attempts: aiService?.lastRequestDiagnostics?.attempts || null
             });
         } catch (error) {

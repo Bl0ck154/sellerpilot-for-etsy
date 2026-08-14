@@ -1,7 +1,7 @@
 {
     "manifest_version": 3,
     "name": "Etsy AI Assistant",
-    "version": "1.6.21",
+    "version": "1.6.22",
     "description": "AI assistant integrated into Etsy pages",
     "permissions": [
         "scripting",
@@ -17,6 +17,11 @@
         "https://generativelanguage.googleapis.com/*",
         "https://openrouter.ai/*",
         "https://raw.githubusercontent.com/Bl0ck154/ChromeExtensionEtsyAI/*"
+    ],
+    "optional_host_permissions": [
+        "https://*/*",
+        "http://localhost/*",
+        "http://127.0.0.1/*"
     ],
     "background": {
         "service_worker": "background/service_worker.js"
@@ -35,12 +40,14 @@
                 "libs/turndown.js",
                 "content/page_parser.js",
                 "content/agent_policy_manager.js",
+                "content/gemini_auxiliary_service.js",
                 "content/shop_intelligence_manager.js",
                 "content/image_intelligence_manager.js",
                 "content/etsy_context_interceptor.js",
                 "content/link_discovery.js",
                 "content/listing_editor_tracker.js",
                 "content/memory_manager.js",
+                "content/conversation_context_manager.js",
                 "content/quick_reply_manager.js",
                 "content/quick_reply_ui.js",
                 "content/base_ai_service.js",
@@ -48,6 +55,7 @@
                 "content/providers/deepseek_service.js",
                 "content/providers/grok_service.js",
                 "content/providers/openrouter_service.js",
+                "content/providers/custom_openai_service.js",
                 "content/ai_service_factory.js",
                 "content/image_modal.js",
                 "content/chat_manager.js",

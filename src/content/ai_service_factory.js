@@ -2,6 +2,14 @@
 // Dynamically loads and instantiates the appropriate AI service based on configuration
 
 class AIServiceFactory {
+    static DEFAULT_MODELS = {
+        gemini: 'gemini-flash-latest',
+        deepseek: 'deepseek-chat',
+        grok: 'grok-beta',
+        openrouter: 'openrouter/auto',
+        custom: ''
+    };
+
     /**
      * Check if extension context is still valid
      * @private
@@ -16,11 +24,9 @@ class AIServiceFactory {
      * @returns {Promise<BaseAIService>} Instance of the provider service
      */
     static async createService(providerId) {
-        // Find provider configuration
-        const provider = window.ETSY_AI_CONFIG?.providers?.find(p => p.id === providerId);
-
-        if (!provider) {
-            throw new Error(`Unknown AI provider: ${providerId}`);
+        if (providerId === 'custom') {
+            if (!window.CustomOpenAIService) throw new Error('CustomOpenAIService not loaded');
+            return new window.CustomOpenAIService();
         }
 
         // Service classes are already loaded via manifest.json
@@ -133,7 +139,7 @@ class AIServiceFactory {
         // Check extension context before storage access
         if (!AIServiceFactory.isExtensionContextValid()) {
             const provider = window.ETSY_AI_CONFIG?.providers?.find(p => p.id === providerId);
-            return provider?.defaultModel || provider?.models[0]?.id || '';
+            return provider?.defaultModel || provider?.models[0]?.id || AIServiceFactory.DEFAULT_MODELS[providerId] || '';
         }
 
         try {
@@ -143,14 +149,14 @@ class AIServiceFactory {
             // If no model selected, use default from config
             if (!result[storageKey]) {
                 const provider = window.ETSY_AI_CONFIG?.providers?.find(p => p.id === providerId);
-                return provider?.defaultModel || provider?.models[0]?.id || '';
+                return provider?.defaultModel || provider?.models[0]?.id || AIServiceFactory.DEFAULT_MODELS[providerId] || '';
             }
 
             return result[storageKey];
         } catch (e) {
             if (e.message.includes('Extension context invalidated')) {
                 const provider = window.ETSY_AI_CONFIG?.providers?.find(p => p.id === providerId);
-                return provider?.defaultModel || provider?.models[0]?.id || '';
+                return provider?.defaultModel || provider?.models[0]?.id || AIServiceFactory.DEFAULT_MODELS[providerId] || '';
             }
             throw e;
         }

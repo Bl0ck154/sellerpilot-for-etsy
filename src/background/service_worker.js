@@ -284,3 +284,147 @@ async function cleanupRAGStorage() {
         console.error('❌ RAG Storage cleanup failed:', error);
     }
 }
+
+// Custom OpenAI-compatible provider streaming runs in the extension worker so
+// cross-origin behavior does not depend on the Etsy page's CORS policy.
+function validateCustomProviderEndpoint(value) {
+    const url = new URL(String(value || '').trim());
+    const localHost = ['localhost', '127.0.0.1', '::1'].includes(url.hostname);
+    if (url.protocol !== 'https:' && !(url.protocol === 'http:' && localHost)) {
+        throw new Error('Custom provider must use HTTPS unless it is local.');
+    }
+    if (url.username || url.password || url.search || url.hash) {
+        throw new Error('Custom provider URL contains unsupported credentials, query, or fragment.');
+    }
+    const clean = url.toString().replace(/\/+$/, '');
+    return /\/chat\/completions$/i.test(url.pathname) ? clean : `${clean}/chat/completions`;
+}
+
+function customProviderText(data) {
+    const content = data?.choices?.[0]?.message?.content ?? data?.choices?.[0]?.delta?.content;
+    if (typeof content === 'string') return content;
+    if (Array.isArray(content)) return content.map(part => typeof part === 'string' ? part : part?.text || '').join('');
+    return '';
+}
+
+async function streamCustomProviderRequest(port, message, controller) {
+    const settings = await chrome.storage.local.get(['custom_provider_enabled', 'custom_base_url', 'custom_api_key', 'custom_model']);
+    if (!settings.custom_provider_enabled) throw new Error('Custom provider is disabled.');
+    const endpoint = validateCustomProviderEndpoint(settings.custom_base_url);
+    const model = String(message.modelId || settings.custom_model || '').trim();
+    if (!model) throw new Error('Custom provider model is not configured.');
+
+    const headers = { 'Content-Type': 'application/json', 'Accept': 'text/event-stream, application/json' };
+    if (settings.custom_api_key) headers.Authorization = `Bearer ${settings.custom_api_key}`;
+
+    const response = await fetch(endpoint, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+            model,
+            messages: [{ role: 'system', content: message.systemInstruction || '' }, ...(message.messages || [])],
+            stream: true
+        }),
+        redirect: 'error',
+        signal: controller.signal
+    });
+
+    if (!response.ok) {
+        let detail = '';
+        try {
+            const body = await response.json();
+            detail = String(body?.error?.message || body?.message || '').slice(0, 500);
+        } catch (_) { /* Status is sufficient. */ }
+        const error = new Error(detail || `Custom provider API error: ${response.status}`);
+        error.statusCode = response.status;
+        throw error;
+    }
+
+    const contentType = String(response.headers.get('content-type') || '').toLowerCase();
+    if (contentType.includes('application/json')) {
+        const data = await response.json();
+        if (data?.error) throw new Error(String(data.error.message || 'Custom provider returned an error').slice(0, 500));
+        const text = customProviderText(data);
+        if (!text) throw new Error('Custom provider returned no text.');
+        port.postMessage({ type: 'chunk', chunk: text, fullText: text });
+        port.postMessage({ type: 'complete', fullText: text });
+        return;
+    }
+
+    if (!response.body?.getReader) throw new Error('Custom provider returned an unreadable stream.');
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let fullText = '';
+    const processLine = line => {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith('data:')) return;
+        const payload = trimmed.slice(5).trim();
+        if (!payload || payload === '[DONE]') return;
+        let data;
+        try { data = JSON.parse(payload); } catch (_) { return; }
+        if (data?.error) throw new Error(String(data.error.message || 'Custom provider stream error').slice(0, 500));
+        const chunk = customProviderText(data);
+        if (!chunk) return;
+        fullText += chunk;
+        port.postMessage({ type: 'chunk', chunk, fullText });
+    };
+
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split(/\r?\n/);
+        buffer = lines.pop() || '';
+        for (const line of lines) processLine(line);
+    }
+    buffer += decoder.decode();
+    if (buffer.trim()) processLine(buffer);
+    if (!fullText) throw new Error('Custom provider returned no text.');
+    port.postMessage({ type: 'complete', fullText });
+}
+
+chrome.runtime.onConnect?.addListener(port => {
+    if (port.name !== 'custom-ai-stream') return;
+    const senderUrl = String(port.sender?.tab?.url || port.sender?.url || '');
+    if (!senderUrl.startsWith('https://www.etsy.com/')) {
+        port.disconnect();
+        return;
+    }
+
+    const controller = new AbortController();
+    let started = false;
+    let timeoutId = null;
+    let userAborted = false;
+    let timedOut = false;
+    port.onDisconnect.addListener(() => {
+        clearTimeout(timeoutId);
+        controller.abort();
+    });
+    port.onMessage.addListener(message => {
+        if (message?.type === 'abort') {
+            userAborted = true;
+            controller.abort();
+            return;
+        }
+        if (message?.type !== 'start' || started) return;
+        started = true;
+        timeoutId = setTimeout(() => {
+            timedOut = true;
+            controller.abort(new DOMException('Custom provider timed out.', 'TimeoutError'));
+        }, 60000);
+        streamCustomProviderRequest(port, message, controller)
+            .catch(error => {
+                if (controller.signal.aborted && !error?.message) return;
+                try {
+                    port.postMessage({
+                        type: 'error',
+                        message: String(error?.message || error || 'Custom provider failed').slice(0, 500),
+                        statusCode: error?.statusCode || (timedOut ? 408 : null),
+                        aborted: userAborted
+                    });
+                } catch (_) { /* Port already closed. */ }
+            })
+            .finally(() => clearTimeout(timeoutId));
+    });
+});

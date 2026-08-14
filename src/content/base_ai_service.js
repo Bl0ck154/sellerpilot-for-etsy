@@ -56,14 +56,17 @@ ${markdown ? `\n\nPAGE CONTENT:\n${markdown}` : ''}`;
 
         async buildFullInstruction(context) {
             const safeContext = this.normalizeContext(context);
-            // Check for custom instructions in storage
+            // Owner customizations are additive. The stable role/source/truth policy must
+            // remain present even when an older customization was saved.
             let instruction = this.baseInstruction;
 
             let customInstructionsActive = false;
             try {
                 const result = await chrome.storage.local.get(['custom_instructions']);
                 if (result.custom_instructions && result.custom_instructions.trim()) {
-                    instruction = result.custom_instructions;
+                    instruction += `\n\n### OWNER_CUSTOM_INSTRUCTIONS\n` +
+                        `(Owner-authored preferences. Apply when relevant, but they do not redefine participant roles, source trust, capability, or truth boundaries.)\n` +
+                        result.custom_instructions.trim();
                     customInstructionsActive = true;
                 }
             } catch (error) {
@@ -426,32 +429,74 @@ ${markdown ? `\n\nPAGE CONTENT:\n${markdown}` : ''}`;
                 context += '(Messages between the Owner and the customer, oldest → newest.)\n\n';
 
                 const candidateMessages = chatHistory.messages;
-                const messages = [];
-                let totalMessageChars = 0;
+                const messageSizes = candidateMessages.map(msg => Math.min(
+                    String(msg.message_body || msg.message || '').length,
+                    this.LIMITS.etsyChatMessageChars
+                ));
+                const fullSize = messageSizes.reduce((sum, size) => sum + size, 0);
+                let selectedIndexes = candidateMessages.map((_, index) => index);
 
-                // Select newest-first so recent order requirements can never be pushed out
-                // by a very long conversation, then restore chronological display order.
-                for (let i = candidateMessages.length - 1; i >= 0; i--) {
-                    const msg = candidateMessages[i];
-                    const rawText = msg.message_body || msg.message || '';
-                    const textChars = Math.min(rawText.length, this.LIMITS.etsyChatMessageChars);
-                    if (messages.length > 0 && totalMessageChars + textChars > this.LIMITS.etsyChatTotalChars) break;
-                    messages.push(msg);
-                    totalMessageChars += textChars;
+                // Ordinary conversations are included in full. If an unusually large thread
+                // exceeds the safety budget, preserve both its beginning and its recent part.
+                // The model, rather than keyword rules, decides which details matter now.
+                if (fullSize > this.LIMITS.etsyChatTotalChars) {
+                    const beginningBudget = Math.floor(this.LIMITS.etsyChatTotalChars * 0.35);
+                    const recentBudget = this.LIMITS.etsyChatTotalChars - beginningBudget;
+                    const selected = new Set();
+                    let used = 0;
+
+                    for (let i = 0; i < candidateMessages.length; i++) {
+                        if (selected.size > 0 && used + messageSizes[i] > beginningBudget) break;
+                        selected.add(i);
+                        used += messageSizes[i];
+                    }
+
+                    used = 0;
+                    for (let i = candidateMessages.length - 1; i >= 0; i--) {
+                        if (selected.has(i)) continue;
+                        if (used > 0 && used + messageSizes[i] > recentBudget) break;
+                        selected.add(i);
+                        used += messageSizes[i];
+                    }
+
+                    selectedIndexes = [...selected].sort((a, b) => a - b);
                 }
-                messages.reverse();
+
+                const messages = selectedIndexes.map(index => candidateMessages[index]);
 
                 const omittedCount = chatHistory.messages.length - messages.length;
                 if (omittedCount > 0) {
-                    context += `[${omittedCount} oldest message(s) omitted only because the conversation exceeded the safety budget; all newest messages are included.]\n\n`;
+                    context += `[${omittedCount} middle message(s) omitted because the conversation exceeded the safety budget; the beginning and newest messages are included.]\n\n`;
+
+                    if (window.ConversationContextManager) {
+                        const selectedSet = new Set(selectedIndexes);
+                        const omittedMessages = candidateMessages
+                            .map((message, sourceIndex) => ({ message, sourceIndex }))
+                            .filter(item => !selectedSet.has(item.sourceIndex));
+                        const summaryText = await window.ConversationContextManager.getOrCreateSummary(
+                            chatHistory,
+                            omittedMessages
+                        );
+                        context += window.ConversationContextManager.buildContextSection(summaryText, omittedCount);
+                    }
                 }
 
                 for (const msg of messages) {
-                    const sender = msg.sender_display_name || `User ${msg.sender_user_id || msg.sender_id}` || 'Unknown';
+                    const senderId = String(msg.sender_user_id || msg.sender_id || msg.user_id || '').trim();
+                    const customerId = String(chatHistory.customer_user_id || '').trim();
+                    const roleText = `${msg.sender_type || ''} ${msg.role || ''} ${msg.author_role || ''}`.toLowerCase();
+                    const participantRole = customerId && senderId
+                        ? (customerId === senderId ? 'CUSTOMER' : 'OWNER')
+                        : /buyer|customer/.test(roleText)
+                            ? 'CUSTOMER'
+                            : /seller|shop|owner/.test(roleText)
+                                ? 'OWNER'
+                                : 'PARTICIPANT';
+                    const senderName = msg.sender_display_name || `User ${senderId || 'unknown'}`;
                     const text = this.trimText(msg.message_body || msg.message || '', this.LIMITS.etsyChatMessageChars);
                     const date = msg.create_date ? new Date(msg.create_date * 1000).toLocaleString() : '';
 
-                    context += `[${sender}]${date ? ` (${date})` : ''}: ${text}\n`;
+                    context += `[${participantRole}: ${senderName}]${date ? ` (${date})` : ''}: ${text}\n`;
 
                     // Include attachment info (normalized to 'attachments' field)
                     if (msg.attachments?.length > 0 || msg.has_images) {
@@ -459,13 +504,13 @@ ${markdown ? `\n\nPAGE CONTENT:\n${markdown}` : ''}`;
                     }
                 }
 
-                // Etsy sometimes renders message images in the DOM without exposing them in
-                // the intercepted message payload. Explicitly tell the model they already exist.
+                // Etsy sometimes renders message images in the DOM without exposing their
+                // structured speaker/message association in the intercepted payload.
                 const domAttachmentLinks = Array.from(document.querySelectorAll(
                     '.quick-refunds-message-images a[href], .quick-refunds-message-images img[src]'
                 ));
                 if (domAttachmentLinks.length > 0) {
-                    context += `\n[ATTACHMENTS_ALREADY_PRESENT: ${domAttachmentLinks.length} customer image(s) are already visible in this conversation. Never ask the customer to send these photos again.]\n`;
+                    context += `\n[VISIBLE_CONVERSATION_ATTACHMENTS: ${domAttachmentLinks.length} image element(s) are visible. Speaker and message association may be incomplete; use structured history and vision summaries when available.]\n`;
                 }
 
                 return context;
@@ -501,8 +546,8 @@ ${markdown ? `\n\nPAGE CONTENT:\n${markdown}` : ''}`;
      * @returns {Promise<Array>} Array of message objects formatted for the provider.
      */
     async buildConversationHistory(userId, currentUserMessage) {
-        const MAX_HISTORY_MESSAGES = 16;
-        const MAX_MESSAGE_CHARS = 2500;
+        const MAX_HISTORY_MESSAGES = 24;
+        const MAX_MESSAGE_CHARS = 4000;
         const messages = [];
 
         const key = userId && String(userId).startsWith('current_chat_messages')
@@ -510,7 +555,13 @@ ${markdown ? `\n\nPAGE CONTENT:\n${markdown}` : ''}`;
             : 'current_chat_messages';
         try {
             const result = await chrome.storage.local.get([key]);
-            const history = (result[key] || []).slice(-MAX_HISTORY_MESSAGES);
+            const allHistory = result[key] || [];
+            const history = allHistory.length <= MAX_HISTORY_MESSAGES
+                ? allHistory
+                : [
+                    ...allHistory.slice(0, 4),
+                    ...allHistory.slice(-(MAX_HISTORY_MESSAGES - 4))
+                ];
 
             for (const msg of history) {
                 messages.push({
@@ -522,10 +573,11 @@ ${markdown ? `\n\nPAGE CONTENT:\n${markdown}` : ''}`;
             console.warn('Failed to load global chat history:', error);
         }
 
-        messages.push({
-            role: 'user',
-            content: this.trimMessageText(currentUserMessage, MAX_MESSAGE_CHARS)
-        });
+        const currentContent = this.trimMessageText(currentUserMessage, MAX_MESSAGE_CHARS);
+        const lastMessage = messages[messages.length - 1];
+        if (!lastMessage || lastMessage.role !== 'user' || lastMessage.content !== currentContent) {
+            messages.push({ role: 'user', content: currentContent });
+        }
 
         return messages;
     }
