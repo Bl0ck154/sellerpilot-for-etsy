@@ -26,6 +26,29 @@ window.EtsyContextInterceptor = (function () {
         return !!live && live === normalizeId(convoId);
     }
 
+    function messageTimeMs(message) {
+        const raw = message?.create_date ?? message?.created_at ?? message?.timestamp ?? null;
+        const numeric = Number(raw);
+        if (raw !== null && raw !== '' && Number.isFinite(numeric) && numeric > 0) {
+            return numeric < 10_000_000_000 ? numeric * 1000 : numeric;
+        }
+        const parsed = Date.parse(String(raw || ''));
+        return Number.isFinite(parsed) ? parsed : 0;
+    }
+
+    function normalizeMessages(messages) {
+        const normalized = (messages || []).map(message => ({
+            ...message,
+            attachments: message.attachments || message.images || []
+        }));
+        // Sort only when every message has a reliable timestamp. Otherwise preserve Etsy's
+        // source ordering instead of inventing chronology for undated records.
+        if (normalized.length > 1 && normalized.every(message => messageTimeMs(message) > 0)) {
+            normalized.sort((a, b) => messageTimeMs(a) - messageTimeMs(b));
+        }
+        return normalized;
+    }
+
     function setupMessageListener() {
         if (messageListenerInstalled) return;
         messageListenerInstalled = true;
@@ -42,7 +65,6 @@ window.EtsyContextInterceptor = (function () {
     async function handleDetailViewData(data) {
         const detail = data?.detail;
         if (!detail) return;
-
         const shopId = data?.shop_id || detail?.shop_id || null;
         await processDetailData(detail, shopId);
     }
@@ -74,11 +96,6 @@ window.EtsyContextInterceptor = (function () {
             const existingTimestamp = sameConversation ? Number(existingHistory?.timestamp || 0) : 0;
 
             if (responseTimestamp >= existingTimestamp) {
-                const normalizedMessages = finalMessages.map(message => ({
-                    ...message,
-                    attachments: message.attachments || message.images || []
-                }));
-
                 await chrome.storage.local.set({
                     [STORAGE_KEYS.CHAT_HISTORY]: {
                         convo_id: convoId,
@@ -86,7 +103,7 @@ window.EtsyContextInterceptor = (function () {
                         customer_user_id: detail.other_user?.user_id
                             ? String(detail.other_user.user_id)
                             : null,
-                        messages: normalizedMessages,
+                        messages: normalizeMessages(finalMessages),
                         timestamp: responseTimestamp
                     }
                 });
@@ -133,9 +150,6 @@ window.EtsyContextInterceptor = (function () {
         const onNavigation = () => {
             clearStaleStorage();
             if (window.location.pathname.startsWith('/messages')) {
-                // The page interceptor may have just been injected after an SPA transition.
-                // Parse whatever initial context Etsy exposes and rely on intercepted fetches
-                // for subsequent hydration.
                 setTimeout(parseInitialContext, 0);
             }
         };
