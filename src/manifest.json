@@ -51,6 +51,7 @@
                 "content/quick_reply_manager.js",
                 "content/quick_reply_ui.js",
                 "content/base_ai_service.js",
+                "content/agent_context_manager.js",
                 "content/providers/gemini_service.js",
                 "content/providers/deepseek_service.js",
                 "content/providers/grok_service.js",
