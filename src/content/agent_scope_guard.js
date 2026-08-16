@@ -11,6 +11,8 @@
     const CURRENT_CONTEXT_KEY = 'current_context';
 
     let cleanupInFlight = false;
+    let cleanupPending = false;
+    let pendingForceListingClear = false;
     let contextSyncTimer = null;
     let listingValidationTimer = null;
     let lastKnownLiveConversationId = getLiveConversationId();
@@ -196,7 +198,11 @@
     }
 
     async function clearStaleScopedState({ forceListingClear = false } = {}) {
-        if (cleanupInFlight) return;
+        if (cleanupInFlight) {
+            cleanupPending = true;
+            pendingForceListingClear = pendingForceListingClear || forceListingClear;
+            return;
+        }
         cleanupInFlight = true;
         try {
             const liveConversationId = getLiveConversationId();
@@ -233,6 +239,12 @@
             if (remove.size) await storageRemove([...remove]);
         } finally {
             cleanupInFlight = false;
+            if (cleanupPending) {
+                const rerunForce = pendingForceListingClear;
+                cleanupPending = false;
+                pendingForceListingClear = false;
+                Promise.resolve().then(() => clearStaleScopedState({ forceListingClear: rerunForce }));
+            }
         }
     }
 
@@ -458,7 +470,11 @@
             clearStaleScopedState();
             return;
         }
-        bindListingScopeFromDetail(event.data.data).catch(() => {});
+        // Current builds bind listing scope in EtsyContextInterceptor itself. Keep this
+        // fallback only for compatibility if that interceptor is absent in a partial load.
+        if (!window.EtsyContextInterceptor) {
+            bindListingScopeFromDetail(event.data.data).catch(() => {});
+        }
     });
 
     chrome.storage.onChanged.addListener((changes, areaName) => {
