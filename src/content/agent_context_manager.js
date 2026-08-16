@@ -190,7 +190,7 @@
         return snapshot;
     }
 
-    async function recordDetailFacts(data) {
+    async function recordDetailFacts(data, ordering = {}) {
         const detail = data?.detail;
         if (!detail || !chrome.runtime?.id) return false;
 
@@ -198,27 +198,47 @@
         const convoId = String(detail.conversation_id || '').trim();
         if (!liveConvoId || convoId !== String(liveConvoId)) return false;
 
+        const requestSequence = Number(ordering.requestSequence);
+        const hasOrderedSource = Number.isFinite(requestSequence) && requestSequence >= 0;
+        const sourceSessionId = window.EtsyContextInterceptor?.getSessionId?.() || null;
+
+        if (hasOrderedSource && sourceSessionId) {
+            const existingState = await storageGet([ACTIVE_FACTS_KEY]);
+            const existing = existingState[ACTIVE_FACTS_KEY];
+            if (existing?.convoId === convoId &&
+                existing.sourceSessionId === sourceSessionId &&
+                Number(existing.sourceSequence || 0) > requestSequence) {
+                return false;
+            }
+        }
+
         const receipt = detail.receipt_history?.[0] || null;
         const transactionIds = (receipt?.transactions || [])
             .map(item => item?.transaction_id)
             .filter(Boolean)
             .map(String);
+        const nextFacts = {
+            convoId,
+            receiptId: receipt?.receipt_id ? String(receipt.receipt_id) : null,
+            transactionIds,
+            updatedAt: Date.now()
+        };
+        if (hasOrderedSource && sourceSessionId) {
+            nextFacts.sourceSessionId = sourceSessionId;
+            nextFacts.sourceSequence = requestSequence;
+        }
 
-        await storageSet({
-            [ACTIVE_FACTS_KEY]: {
-                convoId,
-                receiptId: receipt?.receipt_id ? String(receipt.receipt_id) : null,
-                transactionIds,
-                updatedAt: Date.now()
-            }
-        });
+        await storageSet({ [ACTIVE_FACTS_KEY]: nextFacts });
         return true;
     }
 
     window.addEventListener('message', event => {
         if (event.source !== window || event.data?.source !== 'etsy-page-interceptor') return;
         if (event.data?.type !== 'ETSY_DETAIL_VIEW_DATA') return;
-        recordDetailFacts(event.data.data).catch(error => {
+        recordDetailFacts(event.data.data, {
+            requestSequence: event.data.requestSequence,
+            requestStartedAt: event.data.requestStartedAt
+        }).catch(error => {
             console.debug('AgentContext: detail facts update failed', error?.message || error);
         });
     });
@@ -277,8 +297,6 @@
         MAX_ASSISTANT_HISTORY_MESSAGES,
         buildActiveContextSnapshot,
         recordDetailFacts,
-        // Backward-compatible name for older diagnostics/tests; enrichment is now handled
-        // by the core interceptor and this method only records deterministic active facts.
         enrichDetailViewData: recordDetailFacts
     };
 })();
