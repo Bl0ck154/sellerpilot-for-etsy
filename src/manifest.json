@@ -44,6 +44,7 @@
                 "content/agent_auxiliary_prompt_guard.js",
                 "content/shop_intelligence_manager.js",
                 "content/image_intelligence_manager.js",
+                "content/agent_vision_metadata_guard.js",
                 "content/etsy_context_interceptor.js",
                 "content/link_discovery.js",
                 "content/listing_editor_tracker.js",
@@ -64,7 +65,6 @@
                 "content/chat_manager.js",
                 "content/content.js",
                 "content/agent_scope_guard.js",
-                "content/agent_vision_metadata_guard.js",
                 "content/agent_output_guard.js",
                 "content/chat_ui.js",
                 "content/chat_submission_guard.js"
