@@ -54,12 +54,15 @@ const prompt = "Classify whether the Owner's latest turn is an explicit request 
     assert.equal(JSON.parse(ordinaryRaw).domain, 'none');
 
     const explicit = await window.AIServiceFactory.getCurrentService('gemini');
+    let explicitRaw = '';
     await explicit.streamMessage({
         systemInstruction: prompt,
-        messages: [{ role: 'user', content: 'remember this for future: I prefer short replies' }]
+        messages: [{ role: 'user', content: 'remember this for future: I prefer short replies' }],
+        onComplete: value => { explicitRaw = value; }
     });
     assert.equal(delegatedCalls, 1, 'explicit management requests still use semantic classification');
     assert.match(lastDelegatedInstruction, /action=offer is disabled/);
+    assert.equal(JSON.parse(explicitRaw).action, 'none', 'unsolicited offer output is hard-normalized to none');
 
     // The gate must not alter normal main-agent calls.
     const main = await window.AIServiceFactory.getCurrentService('gemini');
