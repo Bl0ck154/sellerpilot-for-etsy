@@ -14,12 +14,13 @@ const storage = {
         messages: [
             { sender_user_id: 'buyer-1', sender_display_name: 'Anna', message_body: 'First request', create_date: 1700000000 },
             { sender_user_id: 'owner-1', sender_display_name: 'Owner', message_body: 'Sure', create_date: 1700000100 },
-            { sender_user_id: 'buyer-1', sender_display_name: 'Anna', body: 'Actually use the second photo', create_date: 1700000200, attachments: [{ id: 1 }] }
+            { sender_display_name: 'Anna', body: 'Actually use the second photo', created_at: '2026-08-16T10:00:00Z', attachments: [{ id: 1 }] }
         ]
     },
     ETSY_CURRENT_LISTING_ID: '999',
+    ETSY_CURRENT_LISTING_SCOPE: { convoId: '123', listingId: '999' },
     RAG_LISTING_999: { title: 'Custom Family Portrait' },
-    current_chat_messages_scope: Array.from({ length: 40 }, (_, index) => ({
+    current_chat_messages_scope: Array.from({ length: 50 }, (_, index) => ({
         type: index % 2 ? 'ai' : 'user',
         text: `assistant-thread-${index}`
     }))
@@ -37,9 +38,10 @@ class BaseAIService {
     }
 }
 
+const listeners = {};
 const window = {
     BaseAIService,
-    addEventListener() {},
+    addEventListener(type, handler) { listeners[type] = handler; },
     ImageIntelligenceManager: {
         getMetadata: () => ({ imageIntelCount: 2, imageIntelErrors: [] })
     }
@@ -72,9 +74,7 @@ const context = {
     String,
     Array,
     Object,
-    Math,
-    encodeURIComponent,
-    fetch: async () => { throw new Error('Unexpected fetch in unit test'); }
+    Math
 };
 window.window = window;
 window.chrome = chrome;
@@ -96,12 +96,17 @@ vm.runInContext(source, context);
 
     const service = new BaseAIService();
     const history = await service.buildConversationHistory('current_chat_messages_scope', 'new turn');
-    assert.equal(history.length, 33, 'keeps 32 stored assistant turns plus the current Owner turn');
+    assert.equal(history.length, 41, 'keeps 40 stored assistant turns plus the current Owner turn');
     assert.equal(history[0].content, 'assistant-thread-0');
-    assert.equal(history[5].content, 'assistant-thread-5');
-    assert.equal(history[6].content, 'assistant-thread-14');
-    assert.equal(history.at(-2).content, 'assistant-thread-39');
+    assert.equal(history[7].content, 'assistant-thread-7');
+    assert.equal(history[8].content, 'assistant-thread-18');
+    assert.equal(history.at(-2).content, 'assistant-thread-49');
     assert.equal(history.at(-1).content, 'new turn');
+
+    storage.ETSY_CURRENT_LISTING_SCOPE = { convoId: '999', listingId: '999' };
+    const wrongListingSnapshot = await window.AgentContextManager.buildActiveContextSnapshot();
+    assert.match(wrongListingSnapshot, /Active listing: unresolved/);
+    assert.doesNotMatch(wrongListingSnapshot, /Custom Family Portrait/);
 
     storage.ETSY_CHAT_HISTORY = {
         convo_id: '999',
@@ -111,6 +116,26 @@ vm.runInContext(source, context);
     const staleSnapshot = await window.AgentContextManager.buildActiveContextSnapshot();
     assert.match(staleSnapshot, /not ready or mismatched/);
     assert.doesNotMatch(staleSnapshot, /wrong customer/);
+
+    // Detail facts are recorded without triggering a second conversation-history fetch.
+    storage.ETSY_CHAT_HISTORY = {
+        convo_id: '123',
+        messages: [{ sender_display_name: 'Anna', message_body: 'Hi' }],
+        timestamp: Date.now()
+    };
+    await window.AgentContextManager.recordDetailFacts({
+        detail: {
+            conversation_id: '123',
+            receipt_history: [{
+                receipt_id: 77,
+                transactions: [{ transaction_id: 88 }]
+            }]
+        }
+    });
+    assert.deepEqual(
+        JSON.parse(JSON.stringify(storage.ETSY_AI_ACTIVE_CONTEXT_FACTS)),
+        { convoId: '123', receiptId: '77', transactionIds: ['88'], updatedAt: storage.ETSY_AI_ACTIVE_CONTEXT_FACTS.updatedAt }
+    );
 
     console.log('agent context manager tests passed');
 })().catch(error => {
