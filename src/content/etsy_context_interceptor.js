@@ -10,6 +10,8 @@ window.EtsyContextInterceptor = (function () {
 
     let initialized = false;
     let lastConvoId = null;
+    let messageListenerInstalled = false;
+    let navigationListenersInstalled = false;
 
     function getConvoIdFromUrl() {
         return window.location.pathname.match(/^\/messages\/(\d+)/)?.[1] || null;
@@ -25,6 +27,8 @@ window.EtsyContextInterceptor = (function () {
     }
 
     function setupMessageListener() {
+        if (messageListenerInstalled) return;
+        messageListenerInstalled = true;
         window.addEventListener('message', event => {
             if (event.source !== window || event.data?.source !== 'etsy-page-interceptor') return;
             if (event.data?.type !== 'ETSY_DETAIL_VIEW_DATA') return;
@@ -39,7 +43,6 @@ window.EtsyContextInterceptor = (function () {
         const detail = data?.detail;
         if (!detail) return;
 
-        // Etsy has used both response-root and detail-level shop_id shapes.
         const shopId = data?.shop_id || detail?.shop_id || null;
         await processDetailData(detail, shopId);
     }
@@ -70,8 +73,6 @@ window.EtsyContextInterceptor = (function () {
             const sameConversation = normalizeId(existingHistory?.convo_id) === convoId;
             const existingTimestamp = sameConversation ? Number(existingHistory?.timestamp || 0) : 0;
 
-            // Only suppress an older response from this same conversation. A stale
-            // different-conversation object must never block the current conversation.
             if (responseTimestamp >= existingTimestamp) {
                 const normalizedMessages = finalMessages.map(message => ({
                     ...message,
@@ -95,9 +96,7 @@ window.EtsyContextInterceptor = (function () {
 
         let listingId = extractListingId(detail);
         const transactionId = receiptHistory[0]?.transactions?.[0]?.transaction_id;
-        if (!listingId && transactionId) {
-            listingId = await getListingIdFromTransaction(transactionId);
-        }
+        if (!listingId && transactionId) listingId = await getListingIdFromTransaction(transactionId);
         if (!isLiveConversation(convoId)) return false;
 
         if (listingId) {
@@ -128,18 +127,35 @@ window.EtsyContextInterceptor = (function () {
         return true;
     }
 
+    function setupNavigationListeners() {
+        if (navigationListenersInstalled) return;
+        navigationListenersInstalled = true;
+        const onNavigation = () => {
+            clearStaleStorage();
+            if (window.location.pathname.startsWith('/messages')) {
+                // The page interceptor may have just been injected after an SPA transition.
+                // Parse whatever initial context Etsy exposes and rely on intercepted fetches
+                // for subsequent hydration.
+                setTimeout(parseInitialContext, 0);
+            }
+        };
+        window.addEventListener('etsy-ai-locationchange', onNavigation);
+        window.addEventListener('popstate', onNavigation);
+        window.addEventListener('hashchange', onNavigation);
+    }
+
     function init() {
-        if (!window.location.pathname.startsWith('/messages') || initialized) return;
-        initialized = true;
+        // Install listeners globally even when the extension initially loads on a non-message
+        // Etsy page. This lets an in-app SPA transition into /messages become fully hydrated
+        // without requiring a page reload.
+        if (!initialized) {
+            initialized = true;
+            setupMessageListener();
+            setupNavigationListeners();
+        }
 
         clearStaleStorage();
-        parseInitialContext();
-        setupMessageListener();
-
-        const clearOnNavigation = () => clearStaleStorage();
-        window.addEventListener('etsy-ai-locationchange', clearOnNavigation);
-        window.addEventListener('popstate', clearOnNavigation);
-        window.addEventListener('hashchange', clearOnNavigation);
+        if (window.location.pathname.startsWith('/messages')) parseInitialContext();
     }
 
     async function fetchMissionControlHistory(shopId, receiptId) {
@@ -156,7 +172,6 @@ window.EtsyContextInterceptor = (function () {
                 console.warn(`⚠️ Mission-control API failed: ${response.status}`);
                 return [];
             }
-
             const data = await response.json();
             return Array.isArray(data.messages) ? data.messages : [];
         } catch (error) {
@@ -180,9 +195,7 @@ window.EtsyContextInterceptor = (function () {
 
             if (!currentConvoId) {
                 if (chatHistory) remove.push(STORAGE_KEYS.CHAT_HISTORY);
-                if (listingScope) {
-                    remove.push(STORAGE_KEYS.CURRENT_LISTING_ID, STORAGE_KEYS.CURRENT_LISTING_SCOPE);
-                }
+                if (listingScope) remove.push(STORAGE_KEYS.CURRENT_LISTING_ID, STORAGE_KEYS.CURRENT_LISTING_SCOPE);
             } else {
                 if (chatHistory && normalizeId(chatHistory.convo_id) !== currentConvoId) {
                     remove.push(STORAGE_KEYS.CHAT_HISTORY);
@@ -199,10 +212,11 @@ window.EtsyContextInterceptor = (function () {
     }
 
     async function parseInitialContext() {
+        if (!getConvoIdFromUrl()) return;
         try {
             const etsyContext = extractEtsyContext();
             const detail = etsyContext?.data?.initial_data?.detail;
-            if (!detail) return;
+            if (!detail || !isLiveConversation(detail.conversation_id)) return;
 
             const shopId = etsyContext?.data?.shop_id || detail?.shop_id || null;
             await processDetailData(detail, shopId);
@@ -255,14 +269,7 @@ window.EtsyContextInterceptor = (function () {
         }
 
         const seen = new Set();
-        const stack = [
-            detail.receipt_history,
-            detail.messages,
-            detail.order,
-            detail.receipt,
-            detail.transaction
-        ];
-
+        const stack = [detail.receipt_history, detail.messages, detail.order, detail.receipt, detail.transaction];
         while (stack.length > 0) {
             const item = stack.pop();
             if (!item || typeof item !== 'object' || seen.has(item)) continue;
