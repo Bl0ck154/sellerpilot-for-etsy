@@ -1,167 +1,145 @@
-// etsy_context_interceptor.js - Optimized Context Extraction via Fetch Interception
-// Intercepts Etsy's API calls for instant, reliable context updates
-
-/**
- * EtsyContextInterceptor Module
- * Works ONLY on /messages/*id* pages
- * Intercepts /conversations/detail-view-data API for instant updates
- */
+// etsy_context_interceptor.js - Live Etsy conversation ingestion with strict SPA scope guards.
 window.EtsyContextInterceptor = (function () {
-    // === STORAGE KEYS ===
     const STORAGE_KEYS = {
         SHOP_ID: 'ETSY_GLOBAL_SHOP_ID',
         USER_ID: 'ETSY_GLOBAL_USER_ID',
         CHAT_HISTORY: 'ETSY_CHAT_HISTORY',
-        CURRENT_LISTING_ID: 'ETSY_CURRENT_LISTING_ID'
+        CURRENT_LISTING_ID: 'ETSY_CURRENT_LISTING_ID',
+        CURRENT_LISTING_SCOPE: 'ETSY_CURRENT_LISTING_SCOPE'
     };
 
-    // === STATE ===
     let initialized = false;
     let lastConvoId = null;
 
-    // === MESSAGE LISTENER ===
-    /**
-     * Listen for messages from page_interceptor.js
-     */
-    function setupMessageListener() {
-        window.addEventListener('message', (event) => {
-            // Only accept messages from same window and our interceptor
-            if (event.source !== window || event.data.source !== 'etsy-page-interceptor') {
-                return;
-            }
+    function getConvoIdFromUrl() {
+        return window.location.pathname.match(/^\/messages\/(\d+)/)?.[1] || null;
+    }
 
-            if (event.data.type === 'ETSY_DETAIL_VIEW_DATA') {
-                handleDetailViewData(event.data.data).catch(err => {
-                    console.error('🔴 EtsyContextInterceptor: Failed to process detail-view-data:', err);
-                });
-            }
+    function normalizeId(value) {
+        return value === null || value === undefined ? '' : String(value).trim();
+    }
+
+    function isLiveConversation(convoId) {
+        const live = getConvoIdFromUrl();
+        return !!live && live === normalizeId(convoId);
+    }
+
+    function setupMessageListener() {
+        window.addEventListener('message', event => {
+            if (event.source !== window || event.data?.source !== 'etsy-page-interceptor') return;
+            if (event.data?.type !== 'ETSY_DETAIL_VIEW_DATA') return;
+
+            handleDetailViewData(event.data.data).catch(error => {
+                console.error('🔴 EtsyContextInterceptor: Failed to process detail-view-data:', error);
+            });
         });
     }
 
-    /**
-     * Process detail-view-data from page interceptor
-     */
     async function handleDetailViewData(data) {
-        try {
-            const detail = data.detail;
-            if (!detail) return;
+        const detail = data?.detail;
+        if (!detail) return;
 
-            const shopId = detail.shop_id;
-            await processDetailData(detail, shopId);
-        } catch (error) {
-            console.error('🔴 EtsyContextInterceptor: Error processing response:', error);
-        }
+        // Etsy has used both response-root and detail-level shop_id shapes.
+        const shopId = data?.shop_id || detail?.shop_id || null;
+        await processDetailData(detail, shopId);
     }
 
-    /**
-     * Shared logic for processing detail data (from both interceptor and initial context)
-     */
     async function processDetailData(detail, shopId) {
-        const convoId = detail.conversation_id;
-        const messages = detail.messages || [];
-        const receiptHistory = detail.receipt_history || [];
+        const convoId = normalizeId(detail?.conversation_id);
+        if (!convoId || !isLiveConversation(convoId) || !chrome.runtime?.id) return false;
+
+        lastConvoId = convoId;
         const responseTimestamp = Date.now();
-
-        // Store shop_id (persistent)
-        if (shopId && chrome.runtime?.id) {
-            await updateGlobalParam(STORAGE_KEYS.SHOP_ID, shopId);
-        }
-
-        // Get receipt_id for mission-control API
+        const receiptHistory = Array.isArray(detail.receipt_history) ? detail.receipt_history : [];
         const receiptId = receiptHistory[0]?.receipt_id;
-        let finalMessages = messages;
+        let finalMessages = Array.isArray(detail.messages) ? detail.messages : [];
 
-        // If receipt_id exists, fetch FULL history via mission-control API (has proper 'attachments')
+        if (shopId) await updateGlobalParam(STORAGE_KEYS.SHOP_ID, String(shopId));
+
         if (receiptId && shopId) {
             const missionControlMessages = await fetchMissionControlHistory(shopId, receiptId);
-            if (missionControlMessages.length > 0) {
-                finalMessages = missionControlMessages; // Use full history
-            }
+            if (!isLiveConversation(convoId)) return false;
+            if (missionControlMessages.length > 0) finalMessages = missionControlMessages;
         }
 
-        // Store chat history with timestamp for race condition detection
-        if (finalMessages.length > 0 && chrome.runtime?.id) {
-            // Check if there's a newer response already processed
+        if (finalMessages.length > 0 && isLiveConversation(convoId)) {
             const existing = await chrome.storage.local.get([STORAGE_KEYS.CHAT_HISTORY]);
-            const existingTimestamp = existing[STORAGE_KEYS.CHAT_HISTORY]?.timestamp || 0;
+            if (!isLiveConversation(convoId)) return false;
 
-            // Only update if this response is newer (prevent race condition)
+            const existingHistory = existing[STORAGE_KEYS.CHAT_HISTORY];
+            const sameConversation = normalizeId(existingHistory?.convo_id) === convoId;
+            const existingTimestamp = sameConversation ? Number(existingHistory?.timestamp || 0) : 0;
+
+            // Only suppress an older response from this same conversation. A stale
+            // different-conversation object must never block the current conversation.
             if (responseTimestamp >= existingTimestamp) {
-                // Normalize message structure (map 'images' to 'attachments')
-                const normalizedMessages = finalMessages.map(msg => ({
-                    ...msg,
-                    attachments: msg.attachments || msg.images || []
+                const normalizedMessages = finalMessages.map(message => ({
+                    ...message,
+                    attachments: message.attachments || message.images || []
                 }));
 
                 await chrome.storage.local.set({
                     [STORAGE_KEYS.CHAT_HISTORY]: {
-                        convo_id: String(convoId),
+                        convo_id: convoId,
                         customer_display_name: String(detail.other_user?.display_name || '').trim(),
-                        customer_user_id: detail.other_user?.user_id ? String(detail.other_user.user_id) : null,
+                        customer_user_id: detail.other_user?.user_id
+                            ? String(detail.other_user.user_id)
+                            : null,
                         messages: normalizedMessages,
                         timestamp: responseTimestamp
                     }
                 });
-
-                window.ShopIntelligenceManager?.maybeBootstrap('conversation_loaded');
+                window.ShopIntelligenceManager?.maybeBootstrap?.('conversation_loaded');
             }
         }
 
-        // Get listing_id from detail payload first; fall back to transaction redirect.
         let listingId = extractListingId(detail);
         const transactionId = receiptHistory[0]?.transactions?.[0]?.transaction_id;
         if (!listingId && transactionId) {
             listingId = await getListingIdFromTransaction(transactionId);
         }
+        if (!isLiveConversation(convoId)) return false;
 
-        if (listingId && chrome.runtime?.id) {
+        if (listingId) {
             await chrome.storage.local.set({
-                [STORAGE_KEYS.CURRENT_LISTING_ID]: String(listingId)
+                [STORAGE_KEYS.CURRENT_LISTING_ID]: String(listingId),
+                [STORAGE_KEYS.CURRENT_LISTING_SCOPE]: {
+                    convoId,
+                    listingId: String(listingId),
+                    updatedAt: Date.now()
+                }
             });
         } else {
-            // Clear stale listing_id if no transaction in current chat
-            if (chrome.runtime?.id) {
-                await chrome.storage.local.remove(STORAGE_KEYS.CURRENT_LISTING_ID);
-            }
+            await chrome.storage.local.remove([
+                STORAGE_KEYS.CURRENT_LISTING_ID,
+                STORAGE_KEYS.CURRENT_LISTING_SCOPE
+            ]);
         }
 
-        // Analyze every newly received customer image after listing context is ready.
-        // Cached summaries are reused by the assistant; no keyword intent gate is used.
-        window.ImageIntelligenceManager?.analyzeCurrentCustomerImages().catch(error => {
+        if (!isLiveConversation(convoId)) return false;
+        window.ImageIntelligenceManager?.analyzeCurrentCustomerImages?.().catch(error => {
             console.warn('ImageIntelligence: background analysis failed', error);
         });
+        return true;
     }
 
-    // === INITIALIZATION ===
     function init() {
-        // Only run on /messages/* pages
-        if (!window.location.pathname.startsWith('/messages')) {
-            return;
-        }
-
-        if (initialized) return;
+        if (!window.location.pathname.startsWith('/messages') || initialized) return;
         initialized = true;
 
-        // Clear stale storage on page load
         clearStaleStorage();
-
-        // Parse initial Etsy.Context from DOM (for page load/refresh)
         parseInitialContext();
-
-        // Setup message listener to receive data from page_interceptor.js
         setupMessageListener();
+
+        const clearOnNavigation = () => clearStaleStorage();
+        window.addEventListener('etsy-ai-locationchange', clearOnNavigation);
+        window.addEventListener('popstate', clearOnNavigation);
+        window.addEventListener('hashchange', clearOnNavigation);
     }
 
-    /**
-     * Fetch full chat history via mission-control API (has proper 'attachments' field)
-     * @param {string} shopId - Shop ID
-     * @param {string} receiptId - Receipt ID
-     * @returns {Array} Array of message objects with attachments
-     */
     async function fetchMissionControlHistory(shopId, receiptId) {
         try {
-            const url = `https://www.etsy.com/api/v3/ajax/shop/${shopId}/mission-control/orders/convos/${receiptId}`;
-
+            const url = `https://www.etsy.com/api/v3/ajax/shop/${encodeURIComponent(shopId)}/mission-control/orders/convos/${encodeURIComponent(receiptId)}`;
             const response = await fetch(url, {
                 credentials: 'include',
                 headers: {
@@ -169,98 +147,85 @@ window.EtsyContextInterceptor = (function () {
                     'X-Requested-With': 'XMLHttpRequest'
                 }
             });
-
             if (!response.ok) {
                 console.warn(`⚠️ Mission-control API failed: ${response.status}`);
                 return [];
             }
 
             const data = await response.json();
-            return data.messages || [];
-
+            return Array.isArray(data.messages) ? data.messages : [];
         } catch (error) {
             console.error('🔴 Mission-control API error:', error);
             return [];
         }
     }
 
-    /**
-     * Clear storage if it contains data from different conversation
-     */
     async function clearStaleStorage() {
+        if (!chrome.runtime?.id) return;
         const currentConvoId = getConvoIdFromUrl();
-        if (!currentConvoId || !chrome.runtime?.id) return;
 
         try {
-            const result = await chrome.storage.local.get(['ETSY_CHAT_HISTORY']);
-            const chatHistory = result.ETSY_CHAT_HISTORY;
+            const result = await chrome.storage.local.get([
+                STORAGE_KEYS.CHAT_HISTORY,
+                STORAGE_KEYS.CURRENT_LISTING_SCOPE
+            ]);
+            const chatHistory = result[STORAGE_KEYS.CHAT_HISTORY];
+            const listingScope = result[STORAGE_KEYS.CURRENT_LISTING_SCOPE];
+            const remove = [];
 
-            // If storage has data from different conversation - clear it
-            if (chatHistory && chatHistory.convo_id !== currentConvoId) {
-                await chrome.storage.local.remove(['ETSY_CHAT_HISTORY', 'ETSY_CURRENT_LISTING_ID']);
+            if (!currentConvoId) {
+                if (chatHistory) remove.push(STORAGE_KEYS.CHAT_HISTORY);
+                if (listingScope) {
+                    remove.push(STORAGE_KEYS.CURRENT_LISTING_ID, STORAGE_KEYS.CURRENT_LISTING_SCOPE);
+                }
+            } else {
+                if (chatHistory && normalizeId(chatHistory.convo_id) !== currentConvoId) {
+                    remove.push(STORAGE_KEYS.CHAT_HISTORY);
+                }
+                if (listingScope && normalizeId(listingScope.convoId) !== currentConvoId) {
+                    remove.push(STORAGE_KEYS.CURRENT_LISTING_ID, STORAGE_KEYS.CURRENT_LISTING_SCOPE);
+                }
             }
+
+            if (remove.length) await chrome.storage.local.remove([...new Set(remove)]);
         } catch (error) {
             console.error('🔴 EtsyContextInterceptor: Failed to clear stale storage:', error);
         }
     }
 
-    /**
-     * Parse initial Etsy.Context from page HTML (for page load)
-     */
     async function parseInitialContext() {
         try {
             const etsyContext = extractEtsyContext();
-            if (!etsyContext) return;
-
-            const detail = etsyContext.data?.initial_data?.detail;
+            const detail = etsyContext?.data?.initial_data?.detail;
             if (!detail) return;
 
-            const shopId = etsyContext.data?.shop_id;
+            const shopId = etsyContext?.data?.shop_id || detail?.shop_id || null;
             await processDetailData(detail, shopId);
         } catch (error) {
             console.error('🔴 EtsyContextInterceptor: Failed to parse initial context:', error);
         }
     }
 
-    /**
-     * Extract Etsy.Context JSON from page scripts
-     */
     function extractEtsyContext() {
-        // Try window.Etsy.Context first (fastest)
-        if (window.Etsy?.Context) {
-            return window.Etsy.Context;
-        }
+        if (window.Etsy?.Context) return window.Etsy.Context;
 
-        // Fallback: parse from script tags
-        const scripts = document.querySelectorAll('script[type="text/javascript"]');
+        const scripts = document.querySelectorAll('script[type="text/javascript"], script:not([src])');
         for (const script of scripts) {
             const content = script.textContent || '';
+            if (!content.includes('Etsy.Context')) continue;
             const match = content.match(/Etsy\.Context\s*=\s*(\{[\s\S]*?\});?\s*(?:<\/script>|$)/);
-
-            if (match) {
-                try {
-                    let jsonStr = match[1].replace(/;?\s*$/, '');
-                    return JSON.parse(jsonStr);
-                } catch (e) {
-                    console.warn('⚠️ Failed to parse Etsy.Context:', e);
-                }
+            if (!match) continue;
+            try {
+                return JSON.parse(match[1].replace(/;?\s*$/, ''));
+            } catch (_) {
+                // Keep scanning; Etsy can include unrelated script text before the real object.
             }
         }
-
         return null;
     }
 
-    /**
-     * Extract conversation ID from URL
-     */
-    function getConvoIdFromUrl() {
-        const match = window.location.pathname.match(/\/messages\/(\d+)/);
-        return match ? match[1] : null;
-    }
-
     function normalizeListingId(value) {
-        if (value === null || value === undefined) return null;
-        const match = String(value).match(/\d{5,}/);
+        const match = normalizeId(value).match(/\d{5,}/);
         return match ? match[0] : null;
     }
 
@@ -279,14 +244,19 @@ window.EtsyContextInterceptor = (function () {
             detail.receipt_history?.[0]?.transactions?.[0]?.listing?.listing_id,
             detail.receipt_history?.[0]?.transactions?.[0]?.listing?.listingId
         ];
-
         for (const candidate of directCandidates) {
             const id = normalizeListingId(candidate);
             if (id) return id;
         }
 
         const seen = new Set();
-        const stack = [detail.receipt_history, detail.messages, detail.order, detail.receipt, detail.transaction];
+        const stack = [
+            detail.receipt_history,
+            detail.messages,
+            detail.order,
+            detail.receipt,
+            detail.transaction
+        ];
 
         while (stack.length > 0) {
             const item = stack.pop();
@@ -304,104 +274,70 @@ window.EtsyContextInterceptor = (function () {
                     const id = normalizeListingId(value);
                     if (id) return id;
                 }
-
                 if (typeof value === 'string' && /listing/.test(lowerKey + value)) {
                     const match = value.match(/\/listing\/(\d{5,})/);
                     if (match) return match[1];
                 }
-
-                if (value && typeof value === 'object') {
-                    stack.push(value);
-                }
+                if (value && typeof value === 'object') stack.push(value);
             }
         }
-
         return null;
     }
 
-    /**
-     * Extract listing_id from transaction redirect
-     * @param {string} transactionId - Transaction ID
-     * @returns {Promise<string|null>} Listing ID or null
-     */
     async function getListingIdFromTransaction(transactionId) {
         try {
-            const url = `https://www.etsy.com/transaction/${transactionId}`;
-
-            const response = await fetch(url, {
+            const response = await fetch(`https://www.etsy.com/transaction/${encodeURIComponent(transactionId)}`, {
                 credentials: 'include',
                 redirect: 'follow'
             });
-
-            const finalUrl = response.url;
-            if (!finalUrl) return null;
-
-            const match = finalUrl.match(/\/listing\/(\d+)/);
-            if (match) {
-                return match[1];
-            }
-
-            return null;
-
+            return response.url?.match(/\/listing\/(\d+)/)?.[1] || null;
         } catch (error) {
             console.error('🔴 EtsyContextInterceptor: Transaction redirect failed:', error);
             return null;
         }
     }
 
-    /**
-     * Update global parameter in storage (only if changed)
-     */
     async function updateGlobalParam(key, value) {
-        if (!chrome.runtime?.id) {
-            return;
-        }
-
+        if (!chrome.runtime?.id) return;
         try {
             const result = await chrome.storage.local.get([key]);
-            if (result[key] !== value) {
-                await chrome.storage.local.set({ [key]: value });
-            }
+            if (result[key] !== value) await chrome.storage.local.set({ [key]: value });
         } catch (error) {
             console.error(`🔴 EtsyContextInterceptor: Failed to update ${key}:`, error);
         }
     }
 
-    // === PUBLIC API ===
     return {
-        init: init,
-        STORAGE_KEYS: STORAGE_KEYS,
-
-        // Getters for other modules
+        init,
+        STORAGE_KEYS,
         async getShopId() {
             const result = await chrome.storage.local.get([STORAGE_KEYS.SHOP_ID]);
             return result[STORAGE_KEYS.SHOP_ID] || null;
         },
-
         async getUserId() {
             const result = await chrome.storage.local.get([STORAGE_KEYS.USER_ID]);
             return result[STORAGE_KEYS.USER_ID] || null;
         },
-
         async getCurrentListingId() {
-            const result = await chrome.storage.local.get([STORAGE_KEYS.CURRENT_LISTING_ID]);
-            return result[STORAGE_KEYS.CURRENT_LISTING_ID] || null;
+            const result = await chrome.storage.local.get([
+                STORAGE_KEYS.CURRENT_LISTING_ID,
+                STORAGE_KEYS.CURRENT_LISTING_SCOPE
+            ]);
+            const listingId = result[STORAGE_KEYS.CURRENT_LISTING_ID];
+            const scope = result[STORAGE_KEYS.CURRENT_LISTING_SCOPE];
+            const live = getConvoIdFromUrl();
+            if (live && normalizeId(scope?.convoId) !== live) return null;
+            return listingId || null;
         },
-
         async getChatHistory() {
             const result = await chrome.storage.local.get([STORAGE_KEYS.CHAT_HISTORY]);
-            return result[STORAGE_KEYS.CHAT_HISTORY] || null;
+            const history = result[STORAGE_KEYS.CHAT_HISTORY] || null;
+            return history && isLiveConversation(history.convo_id) ? history : null;
         },
-
-        // Debug helper
-        getState: () => ({
-            initialized,
-            lastConvoId
-        })
+        getState: () => ({ initialized, lastConvoId })
     };
 })();
 
-// Auto-initialize when script loads
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => window.EtsyContextInterceptor.init());
 } else {
