@@ -28,24 +28,36 @@ assert.ok(index('content/agent_scope_guard.js') < index('content/agent_vision_me
 assert.ok(index('content/agent_output_guard.js') < index('content/chat_ui.js'));
 
 const injector = read('src/content/inject_interceptor.js');
-assert.match(injector, /etsy-ai-locationchange/);
 assert.match(injector, /function maybeInject\(/);
+assert.match(injector, /Install before any later Etsy SPA transition/);
 assert.doesNotMatch(
     injector,
     /if \(!window\.location\.pathname\.startsWith\('\/messages'\)\)\s*\{\s*return;\s*\}/,
-    'interceptor injection must not permanently exit when extension starts outside messages'
+    'page interceptor must be installed before a later SPA transition into messages'
 );
+
+const pageInterceptor = read('src/content/page_interceptor.js');
+assert.match(pageInterceptor, /let requestSequence = 0/);
+assert.match(pageInterceptor, /const sequence = isDetailRequest \? \+\+requestSequence : 0/);
+assert.match(pageInterceptor, /requestSequence: sequence/);
+assert.match(pageInterceptor, /requestStartedAt/);
 
 const interceptor = read('src/content/etsy_context_interceptor.js');
 assert.match(interceptor, /setupNavigationListeners\(\)/);
 assert.match(interceptor, /Install listeners globally/);
 assert.match(interceptor, /CURRENT_LISTING_SCOPE/);
-assert.match(interceptor, /isLiveConversation\(convoId\)/);
+assert.match(interceptor, /CONTENT_SESSION_ID/);
+assert.match(interceptor, /sourceSequence/);
+assert.match(interceptor, /isResponseCurrent\(convoId, sourceSequence\)/);
 
 const linkDiscovery = read('src/content/link_discovery.js');
 assert.match(linkDiscovery, /Install lightweight global watchers/);
 assert.match(linkDiscovery, /pendingDiscovery/);
 assert.match(linkDiscovery, /ETSY_CURRENT_LISTING_SCOPE/);
+
+const visionGuard = read('src/content/agent_vision_metadata_guard.js');
+assert.match(visionGuard, /hasHydratedLiveHistory/);
+assert.match(visionGuard, /metadataConversationId/);
 
 const outputGuard = read('src/content/agent_output_guard.js');
 assert.match(outputGuard, /\['http:', 'https:', 'mailto:'\]/);
