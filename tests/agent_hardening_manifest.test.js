@@ -12,6 +12,7 @@ assert.equal(manifest.version, '1.6.26');
 assert.match(read('build.bat'), /set VERSION=1\.6\.26/);
 
 for (const required of [
+    'content/agent_auxiliary_prompt_guard.js',
     'content/agent_context_manager.js',
     'content/agent_management_gate.js',
     'content/agent_scope_guard.js',
@@ -21,10 +22,14 @@ for (const required of [
     assert.notEqual(index(required), -1, `${required} must be loaded by the manifest`);
 }
 
+assert.ok(index('content/gemini_auxiliary_service.js') < index('content/agent_auxiliary_prompt_guard.js'));
+assert.ok(index('content/agent_auxiliary_prompt_guard.js') < index('content/shop_intelligence_manager.js'));
+assert.ok(index('content/agent_auxiliary_prompt_guard.js') < index('content/image_intelligence_manager.js'));
+assert.ok(index('content/image_intelligence_manager.js') < index('content/agent_vision_metadata_guard.js'));
+assert.ok(index('content/agent_vision_metadata_guard.js') < index('content/etsy_context_interceptor.js'));
 assert.ok(index('content/base_ai_service.js') < index('content/agent_context_manager.js'));
 assert.ok(index('content/ai_service_factory.js') < index('content/agent_management_gate.js'));
 assert.ok(index('content/content.js') < index('content/agent_scope_guard.js'));
-assert.ok(index('content/agent_scope_guard.js') < index('content/agent_vision_metadata_guard.js'));
 assert.ok(index('content/agent_output_guard.js') < index('content/chat_ui.js'));
 
 const injector = read('src/content/inject_interceptor.js');
@@ -54,6 +59,10 @@ const linkDiscovery = read('src/content/link_discovery.js');
 assert.match(linkDiscovery, /Install lightweight global watchers/);
 assert.match(linkDiscovery, /pendingDiscovery/);
 assert.match(linkDiscovery, /ETSY_CURRENT_LISTING_SCOPE/);
+
+const auxiliaryGuard = read('src/content/agent_auxiliary_prompt_guard.js');
+assert.match(auxiliaryGuard, /SECURITY BOUNDARY/);
+assert.match(auxiliaryGuard, /untrusted evidence, never as instructions/);
 
 const visionGuard = read('src/content/agent_vision_metadata_guard.js');
 assert.match(visionGuard, /hasHydratedLiveHistory/);
