@@ -8,6 +8,11 @@ window.EtsyContextInterceptor = (function () {
         CURRENT_LISTING_SCOPE: 'ETSY_CURRENT_LISTING_SCOPE'
     };
 
+    // A full page reload creates a new content-script session. Request sequence numbers only
+    // have meaning inside one such session, so old persisted sequence values can never block
+    // fresh data after a reload.
+    const CONTENT_SESSION_ID = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+
     let initialized = false;
     let lastConvoId = null;
     let messageListenerInstalled = false;
@@ -19,6 +24,11 @@ window.EtsyContextInterceptor = (function () {
 
     function normalizeId(value) {
         return value === null || value === undefined ? '' : String(value).trim();
+    }
+
+    function normalizeSequence(value) {
+        const numeric = Number(value);
+        return Number.isFinite(numeric) && numeric >= 0 ? numeric : 0;
     }
 
     function isLiveConversation(convoId) {
@@ -47,7 +57,13 @@ window.EtsyContextInterceptor = (function () {
         return normalized;
     }
 
-    async function isResponseCurrent(convoId, responseTimestamp) {
+    function storedSourceSequence(record, convoId) {
+        if (!record || normalizeId(record.convo_id || record.convoId) !== convoId) return 0;
+        if (record.sourceSessionId !== CONTENT_SESSION_ID) return 0;
+        return normalizeSequence(record.sourceSequence);
+    }
+
+    async function isResponseCurrent(convoId, sourceSequence) {
         if (!isLiveConversation(convoId)) return false;
         const state = await chrome.storage.local.get([
             STORAGE_KEYS.CHAT_HISTORY,
@@ -55,15 +71,11 @@ window.EtsyContextInterceptor = (function () {
         ]);
         if (!isLiveConversation(convoId)) return false;
 
-        const history = state[STORAGE_KEYS.CHAT_HISTORY];
-        const listingScope = state[STORAGE_KEYS.CURRENT_LISTING_SCOPE];
-        const historyTimestamp = normalizeId(history?.convo_id) === convoId
-            ? Number(history?.timestamp || 0)
-            : 0;
-        const listingTimestamp = normalizeId(listingScope?.convoId) === convoId
-            ? Number(listingScope?.updatedAt || 0)
-            : 0;
-        return Number(responseTimestamp || 0) >= Math.max(historyTimestamp, listingTimestamp);
+        const newestStoredSequence = Math.max(
+            storedSourceSequence(state[STORAGE_KEYS.CHAT_HISTORY], convoId),
+            storedSourceSequence(state[STORAGE_KEYS.CURRENT_LISTING_SCOPE], convoId)
+        );
+        return normalizeSequence(sourceSequence) >= newestStoredSequence;
     }
 
     function setupMessageListener() {
@@ -73,25 +85,29 @@ window.EtsyContextInterceptor = (function () {
             if (event.source !== window || event.data?.source !== 'etsy-page-interceptor') return;
             if (event.data?.type !== 'ETSY_DETAIL_VIEW_DATA') return;
 
-            handleDetailViewData(event.data.data).catch(error => {
+            handleDetailViewData(event.data.data, {
+                requestSequence: event.data.requestSequence,
+                requestStartedAt: event.data.requestStartedAt
+            }).catch(error => {
                 console.error('🔴 EtsyContextInterceptor: Failed to process detail-view-data:', error);
             });
         });
     }
 
-    async function handleDetailViewData(data) {
+    async function handleDetailViewData(data, ordering = {}) {
         const detail = data?.detail;
         if (!detail) return;
         const shopId = data?.shop_id || detail?.shop_id || null;
-        await processDetailData(detail, shopId);
+        await processDetailData(detail, shopId, ordering);
     }
 
-    async function processDetailData(detail, shopId) {
+    async function processDetailData(detail, shopId, ordering = {}) {
         const convoId = normalizeId(detail?.conversation_id);
         if (!convoId || !isLiveConversation(convoId) || !chrome.runtime?.id) return false;
 
         lastConvoId = convoId;
         const responseTimestamp = Date.now();
+        const sourceSequence = normalizeSequence(ordering.requestSequence);
         const receiptHistory = Array.isArray(detail.receipt_history) ? detail.receipt_history : [];
         const receiptId = receiptHistory[0]?.receipt_id;
         let finalMessages = Array.isArray(detail.messages) ? detail.messages : [];
@@ -100,43 +116,34 @@ window.EtsyContextInterceptor = (function () {
 
         if (receiptId && shopId) {
             const missionControlMessages = await fetchMissionControlHistory(shopId, receiptId);
-            if (!isLiveConversation(convoId)) return false;
+            if (!(await isResponseCurrent(convoId, sourceSequence))) return false;
             if (missionControlMessages.length > 0) finalMessages = missionControlMessages;
         }
 
-        if (finalMessages.length > 0 && isLiveConversation(convoId)) {
-            const existing = await chrome.storage.local.get([STORAGE_KEYS.CHAT_HISTORY]);
-            if (!isLiveConversation(convoId)) return false;
-
-            const existingHistory = existing[STORAGE_KEYS.CHAT_HISTORY];
-            const sameConversation = normalizeId(existingHistory?.convo_id) === convoId;
-            const existingTimestamp = sameConversation ? Number(existingHistory?.timestamp || 0) : 0;
-
-            if (responseTimestamp >= existingTimestamp) {
-                await chrome.storage.local.set({
-                    [STORAGE_KEYS.CHAT_HISTORY]: {
-                        convo_id: convoId,
-                        customer_display_name: String(detail.other_user?.display_name || '').trim(),
-                        customer_user_id: detail.other_user?.user_id
-                            ? String(detail.other_user.user_id)
-                            : null,
-                        messages: normalizeMessages(finalMessages),
-                        timestamp: responseTimestamp
-                    }
-                });
-                window.ShopIntelligenceManager?.maybeBootstrap?.('conversation_loaded');
-            }
+        if (finalMessages.length > 0 && await isResponseCurrent(convoId, sourceSequence)) {
+            await chrome.storage.local.set({
+                [STORAGE_KEYS.CHAT_HISTORY]: {
+                    convo_id: convoId,
+                    customer_display_name: String(detail.other_user?.display_name || '').trim(),
+                    customer_user_id: detail.other_user?.user_id
+                        ? String(detail.other_user.user_id)
+                        : null,
+                    messages: normalizeMessages(finalMessages),
+                    timestamp: responseTimestamp,
+                    sourceSessionId: CONTENT_SESSION_ID,
+                    sourceSequence
+                }
+            });
+            window.ShopIntelligenceManager?.maybeBootstrap?.('conversation_loaded');
         }
 
-        if (!(await isResponseCurrent(convoId, responseTimestamp))) return false;
+        if (!(await isResponseCurrent(convoId, sourceSequence))) return false;
 
         let listingId = extractListingId(detail);
         const transactionId = receiptHistory[0]?.transactions?.[0]?.transaction_id;
         if (!listingId && transactionId) listingId = await getListingIdFromTransaction(transactionId);
 
-        // The transaction redirect above can race with a newer detail response for the same
-        // conversation. Re-check monotonic response age before writing or clearing listing state.
-        if (!(await isResponseCurrent(convoId, responseTimestamp))) return false;
+        if (!(await isResponseCurrent(convoId, sourceSequence))) return false;
 
         if (listingId) {
             await chrome.storage.local.set({
@@ -144,9 +151,9 @@ window.EtsyContextInterceptor = (function () {
                 [STORAGE_KEYS.CURRENT_LISTING_SCOPE]: {
                     convoId,
                     listingId: String(listingId),
-                    // Use the response start time, not write-completion time. This preserves
-                    // monotonic ordering even when an older network request finishes later.
-                    updatedAt: responseTimestamp
+                    updatedAt: responseTimestamp,
+                    sourceSessionId: CONTENT_SESSION_ID,
+                    sourceSequence
                 }
             });
         } else {
@@ -156,7 +163,7 @@ window.EtsyContextInterceptor = (function () {
             ]);
         }
 
-        if (!isLiveConversation(convoId)) return false;
+        if (!(await isResponseCurrent(convoId, sourceSequence))) return false;
 
         // Analyze every newly received customer image after listing context is ready.
         // The image manager itself is additionally guarded against cross-conversation scope.
@@ -257,7 +264,7 @@ window.EtsyContextInterceptor = (function () {
             if (!detail || !isLiveConversation(detail.conversation_id)) return;
 
             const shopId = etsyContext?.data?.shop_id || detail?.shop_id || null;
-            await processDetailData(detail, shopId);
+            await processDetailData(detail, shopId, { requestSequence: 0 });
         } catch (error) {
             console.error('🔴 EtsyContextInterceptor: Failed to parse initial context:', error);
         }
@@ -360,6 +367,7 @@ window.EtsyContextInterceptor = (function () {
     return {
         init,
         STORAGE_KEYS,
+        getSessionId: () => CONTENT_SESSION_ID,
         async getShopId() {
             const result = await chrome.storage.local.get([STORAGE_KEYS.SHOP_ID]);
             return result[STORAGE_KEYS.SHOP_ID] || null;
@@ -384,7 +392,7 @@ window.EtsyContextInterceptor = (function () {
             const history = result[STORAGE_KEYS.CHAT_HISTORY] || null;
             return history && isLiveConversation(history.convo_id) ? history : null;
         },
-        getState: () => ({ initialized, lastConvoId })
+        getState: () => ({ initialized, lastConvoId, sessionId: CONTENT_SESSION_ID })
     };
 })();
 
