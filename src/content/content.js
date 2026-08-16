@@ -68,7 +68,9 @@ function handleLocationChange() {
     setTimeout(() => {
         const context = getContextWithCache();
         if (context && chrome.runtime?.id) {
-            chrome.storage.local.set({ current_context: context }).catch?.(() => {});
+            chrome.storage.local.set({ current_context: context }, () => {
+                void chrome.runtime.lastError;
+            });
         }
     }, 100);
 }
