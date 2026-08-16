@@ -46,7 +46,7 @@
         const conversationId = currentConversationId();
         if (!(await hasHydratedLiveHistory(conversationId))) {
             metadataConversationId = null;
-            return originalAnalyze(...args);
+            return emptyMetadata();
         }
 
         const result = await originalAnalyze(...args);
