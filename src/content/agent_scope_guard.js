@@ -108,6 +108,44 @@
         return null;
     }
 
+    function getTransactionId(detail) {
+        return normalizeId(
+            detail?.transaction?.transaction_id ||
+            detail?.transaction_id ||
+            detail?.receipt_history?.[0]?.transactions?.[0]?.transaction_id
+        ) || null;
+    }
+
+    async function setScopedListing(convoId, listingId) {
+        if (!convoId || !listingId || getLiveConversationId() !== String(convoId)) return false;
+        await storageSet({
+            [LISTING_ID_KEY]: String(listingId),
+            [LISTING_SCOPE_KEY]: {
+                convoId: String(convoId),
+                listingId: String(listingId),
+                updatedAt: Date.now()
+            }
+        });
+        return true;
+    }
+
+    async function resolveListingFromTransaction(transactionId, convoId) {
+        if (!transactionId || !convoId) return null;
+        try {
+            const response = await fetch(`https://www.etsy.com/transaction/${encodeURIComponent(transactionId)}`, {
+                credentials: 'include',
+                redirect: 'follow'
+            });
+            const listingId = response?.url?.match(/\/listing\/(\d+)/)?.[1] || null;
+            if (!listingId || getLiveConversationId() !== String(convoId)) return null;
+            await setScopedListing(convoId, listingId);
+            return listingId;
+        } catch (error) {
+            console.debug('AgentScopeGuard: transaction listing resolution skipped', error?.message || error);
+            return null;
+        }
+    }
+
     function buildFreshPageContext() {
         try {
             const pageData = window.PageParser?.getFullPageData?.();
@@ -136,7 +174,7 @@
         const guarded = function () {
             const cached = original();
             if (cached && contextMatchesLive(cached)) return cached;
-            return buildFreshPageContext() || cached || null;
+            return buildFreshPageContext() || null;
         };
         guarded.__etsyScopeGuarded = true;
         window.EtsyAI_GetFreshContext = guarded;
@@ -149,7 +187,7 @@
         return true;
     }
 
-    function scheduleFreshContextSync(delayMs = 180) {
+    function scheduleFreshContextSync(delayMs = 100) {
         if (contextSyncTimer) clearTimeout(contextSyncTimer);
         contextSyncTimer = setTimeout(() => {
             contextSyncTimer = null;
@@ -205,7 +243,8 @@
         const listingId = normalizeId(state[LISTING_ID_KEY]);
         if (!listingId) return;
         const scope = state[LISTING_SCOPE_KEY];
-        const valid = normalizeId(scope?.convoId) === liveConversationId && normalizeId(scope?.listingId) === listingId;
+        const valid = normalizeId(scope?.convoId) === liveConversationId &&
+            normalizeId(scope?.listingId) === listingId;
         if (!valid) await storageRemove([LISTING_ID_KEY, LISTING_SCOPE_KEY]);
     }
 
@@ -224,16 +263,13 @@
         if (!detail || !liveConversationId || detailConversationId !== liveConversationId) return false;
 
         const listingId = extractDirectListingId(detail);
-        if (!listingId) return false;
-        await storageSet({
-            [LISTING_ID_KEY]: listingId,
-            [LISTING_SCOPE_KEY]: {
-                convoId: liveConversationId,
-                listingId,
-                updatedAt: Date.now()
-            }
-        });
-        return true;
+        if (listingId) return setScopedListing(liveConversationId, listingId);
+
+        const transactionId = getTransactionId(detail);
+        if (transactionId) {
+            resolveListingFromTransaction(transactionId, liveConversationId);
+        }
+        return false;
     }
 
     async function getScopedListingId() {
@@ -243,7 +279,9 @@
         const state = await storageGet([LISTING_ID_KEY, LISTING_SCOPE_KEY]);
         const listingId = normalizeId(state[LISTING_ID_KEY]);
         const scope = state[LISTING_SCOPE_KEY];
-        return listingId && normalizeId(scope?.convoId) === live.conversationId && normalizeId(scope?.listingId) === listingId
+        return listingId &&
+            normalizeId(scope?.convoId) === live.conversationId &&
+            normalizeId(scope?.listingId) === listingId
             ? listingId
             : null;
     }
@@ -400,14 +438,26 @@
         const previousConversationId = lastKnownLiveConversationId;
         const currentConversationId = getLiveConversationId();
         lastKnownLiveConversationId = currentConversationId;
-        await clearStaleScopedState({ forceListingClear: previousConversationId !== currentConversationId });
+
+        // Never leave the previous page snapshot available while Etsy's SPA is between
+        // routes. A fresh deterministic snapshot is stored shortly after the new DOM settles.
+        await storageRemove([CURRENT_CONTEXT_KEY]);
+        await clearStaleScopedState({
+            forceListingClear: previousConversationId !== currentConversationId
+        });
         installFreshContextGuard();
-        scheduleFreshContextSync(180);
+        scheduleFreshContextSync(100);
     }
 
     window.addEventListener('message', event => {
         if (event.source !== window || event.data?.source !== 'etsy-page-interceptor') return;
         if (event.data?.type !== 'ETSY_DETAIL_VIEW_DATA') return;
+        const detailConversationId = normalizeId(event.data.data?.detail?.conversation_id);
+        const liveConversationId = getLiveConversationId();
+        if (!liveConversationId || detailConversationId !== liveConversationId) {
+            clearStaleScopedState();
+            return;
+        }
         bindListingScopeFromDetail(event.data.data).catch(() => {});
     });
 
@@ -443,6 +493,7 @@
         getScopedListingId,
         buildFreshPageContext,
         clearStaleScopedState,
-        bindListingScopeFromDetail
+        bindListingScopeFromDetail,
+        resolveListingFromTransaction
     };
 })();
