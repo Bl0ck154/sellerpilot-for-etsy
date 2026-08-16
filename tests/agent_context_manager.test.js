@@ -96,10 +96,10 @@ vm.runInContext(source, context);
 
     const service = new BaseAIService();
     const history = await service.buildConversationHistory('current_chat_messages_scope', 'new turn');
-    assert.equal(history.length, 41, 'keeps 40 stored assistant turns plus the current Owner turn');
+    assert.equal(history.length, 33, 'keeps 32 stored assistant turns plus the current Owner turn');
     assert.equal(history[0].content, 'assistant-thread-0');
-    assert.equal(history[7].content, 'assistant-thread-7');
-    assert.equal(history[8].content, 'assistant-thread-18');
+    assert.equal(history[5].content, 'assistant-thread-5');
+    assert.equal(history[6].content, 'assistant-thread-24');
     assert.equal(history.at(-2).content, 'assistant-thread-49');
     assert.equal(history.at(-1).content, 'new turn');
 
@@ -117,7 +117,6 @@ vm.runInContext(source, context);
     assert.match(staleSnapshot, /not ready or mismatched/);
     assert.doesNotMatch(staleSnapshot, /wrong customer/);
 
-    // Detail facts are recorded without triggering a second conversation-history fetch.
     storage.ETSY_CHAT_HISTORY = {
         convo_id: '123',
         messages: [{ sender_display_name: 'Anna', message_body: 'Hi' }],
