@@ -12,6 +12,17 @@
         const value = String(text || '').trim().toLowerCase();
         if (!value) return false;
 
+        // Direct English imperative memory commands are common ("remember I prefer...").
+        // Exclude recall questions such as "remember what the customer said?".
+        const directRemember = value.match(/^(?:please\s+)?remember\b\s*(.*)$/i);
+        if (directRemember && !/^(?:what|when|where|who|why|how)\b/i.test(directRemember[1] || '')) {
+            return true;
+        }
+        if (/^(?:can|could|would)\s+you\s+remember\b/i.test(value) &&
+            !/\bremember\s+(?:what|when|where|who|why|how)\b/i.test(value)) {
+            return true;
+        }
+
         const memoryPatterns = [
             /\bremember\b.{0,80}\b(this|that|for future|in memory|preference|fact)\b/i,
             /\b(forget|clear|delete|remove)\b.{0,60}\b(memory|remembered|saved fact|preference)\b/i,
@@ -49,7 +60,6 @@
             if (parsed?.action === 'offer') return noneClassification();
             return text;
         } catch (_) {
-            // The existing classifier parser owns malformed-output recovery.
             return text;
         }
     }
@@ -77,8 +87,6 @@
                 return raw;
             }
 
-            // Explicit management requests still get semantic classification, but technical
-            // classifier streaming stays internal. We emit one normalized result at the end.
             let captured = '';
             const result = await originalStreamMessage({
                 ...params,
