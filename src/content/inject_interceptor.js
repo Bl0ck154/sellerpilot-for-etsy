@@ -1,13 +1,9 @@
-// inject_interceptor.js - Injects page_interceptor.js when Etsy enters messages, including SPA navigation.
+// inject_interceptor.js - Installs the lightweight page fetch interceptor once on Etsy.
 (function () {
     'use strict';
 
-    function isMessagesPage() {
-        return window.location.pathname.startsWith('/messages');
-    }
-
     function maybeInject() {
-        if (!isMessagesPage() || window.__ETSY_INTERCEPTOR_INJECTED__) return false;
+        if (window.__ETSY_INTERCEPTOR_INJECTED__) return false;
         window.__ETSY_INTERCEPTOR_INJECTED__ = true;
 
         const script = document.createElement('script');
@@ -15,7 +11,6 @@
         script.type = 'text/javascript';
         script.onload = () => script.remove();
         script.onerror = () => {
-            // Allow a later navigation/retry to attempt injection again.
             window.__ETSY_INTERCEPTOR_INJECTED__ = false;
             script.remove();
             console.error('🔴 Etsy Interceptor: Failed to inject page script');
@@ -24,7 +19,12 @@
         return true;
     }
 
+    // Install before any later Etsy SPA transition. page_interceptor.js itself only reads
+    // conversation payloads while the live path is /messages/<id>, so the wrapper remains
+    // inert on normal Etsy pages but cannot miss the first fetch after pushState navigation.
     maybeInject();
+
+    // Navigation listeners are retry points only if the first injection failed.
     window.addEventListener('etsy-ai-locationchange', maybeInject);
     window.addEventListener('popstate', maybeInject);
     window.addEventListener('hashchange', maybeInject);
