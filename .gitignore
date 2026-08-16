@@ -1,10 +1,41 @@
-# API Keys and Secrets
+# Secrets and local credentials
+.env
+.env.*
+!.env.example
 config.secret.json
 *.secret.json
+*.secret.*
+*.local.json
+credentials.json
+credentials.*.json
+secrets.json
+secrets.*.json
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Private/local work notes
+tasks/
+.private/
+local-private/
+
+# Browser/session/customer data
+*.har
+*.sqlite
+*.sqlite3
+*.db
+*.db-wal
+*.db-shm
+*.cookies
+cookies.txt
+browser-profile/
+user-data-dir/
 
 # Backups
 nppBackup/
 *.bak
+*.backup
 
 # Debug files
 debug_*.py
@@ -16,7 +47,7 @@ default_chat.html
 Thumbs.db
 desktop.ini
 
-# IDE
+# IDE / agent-local state
 .vscode/
 .idea/
 .claude/
@@ -24,14 +55,15 @@ desktop.ini
 *.swo
 *~
 
-# Logs
+# Logs and coverage
 *.log
 npm-debug.log*
+coverage/
 
-# Extension builds (if any)
+# Generated extension builds and release artifacts
 dist/
 build/
+release/
+artifacts/
 *.zip
-
-# Development documentation (not needed in published extension)
-ARCHITECTURE.md
+*.xpi

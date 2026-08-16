@@ -1,40 +1,25 @@
-# Edge Release Automation
+# Microsoft Edge Add-ons Release
 
-This project has Microsoft Edge Add-ons release automation configured through GitHub Actions.
-
-Workflow:
+The repository contains an optional GitHub Actions workflow for publishing the Chromium build to Microsoft Edge Add-ons:
 
 ```text
 .github/workflows/edge-addons.yml
 ```
 
-GitHub Actions URL:
+## What the workflow does
 
-```text
-https://github.com/Bl0ck154/ChromeExtensionEtsyAI/actions/workflows/edge-addons.yml
-```
+1. Checks out the requested revision.
+2. Runs `build.bat`.
+3. Packages `dist/chrome/`.
+4. Uploads the package to the Edge Add-ons draft submission API.
+5. Optionally submits the draft for publication.
+6. Waits for upload/publish processing status.
 
-The workflow uses the official Microsoft Edge Add-ons Update API v1.1.
+Edge uses the Chromium package; there is no separate Edge source tree.
 
-Docs:
+## Required repository secrets
 
-```text
-https://learn.microsoft.com/en-us/microsoft-edge/extensions/update/api/using-addons-api?tabs=v1-1
-```
-
-## What It Does
-
-- Builds the extension with `build.bat`.
-- Packages the Chromium build from `dist/chrome`.
-- Uploads the ZIP to Microsoft Edge Add-ons as a draft package.
-- Optionally publishes the draft submission.
-- Waits for Edge package/publish processing status.
-
-Edge uses the same Chromium-compatible package as Chrome. There is no separate `dist/edge` build.
-
-## Required GitHub Secrets
-
-These are stored in GitHub repository secrets, not in the codebase:
+The workflow expects these GitHub Actions secrets:
 
 ```text
 EDGE_PRODUCT_ID
@@ -42,83 +27,36 @@ EDGE_CLIENT_ID
 EDGE_API_KEY
 ```
 
-Secrets page:
+Only the **secret names** belong in repository documentation. Never commit, paste, log, or publish their values.
 
-```text
-https://github.com/Bl0ck154/ChromeExtensionEtsyAI/settings/secrets/actions
-```
+## Manual run
 
-## How To Publish
+A maintainer can run the workflow from GitHub Actions and choose whether to upload only or upload and publish.
 
-Manual release:
-
-1. Open the workflow URL.
-2. Click `Run workflow`.
-3. Set `publish=false` to upload only as draft.
-4. Set `publish=true` to upload and publish.
-5. Optionally set certification notes.
-
-CLI release, if GitHub CLI is authenticated:
+With GitHub CLI, an authenticated maintainer can use:
 
 ```powershell
-gh workflow run edge-addons.yml -f publish=true -f notes="Automated release from GitHub Actions."
+gh workflow run edge-addons.yml --ref main -f publish=false
 ```
 
-Draft upload only:
+For an intentional release:
 
 ```powershell
-gh workflow run edge-addons.yml -f publish=false
+gh workflow run edge-addons.yml --ref main -f publish=true -f notes="Release notes"
 ```
 
-Tag release:
+## Tag behavior
 
-```powershell
-git tag v1.6.3
-git push origin v1.6.3
-```
+The workflow is also configured for pushed tags matching `v*`. A matching tag is a publication action, so maintainers should not create/push release tags casually.
 
-Any pushed tag matching `v*` triggers upload and publish.
+## Credential rotation
 
-## API Key Expiry
+Microsoft controls the lifetime and rotation requirements of Edge Add-ons API credentials. Rotate credentials in Partner Center when required and update the corresponding GitHub Actions secret. Do not record current secret values or private credential metadata in this repository.
 
-Current `EDGE_API_KEY` expires:
+## Failure handling
 
-```text
-2026-10-06 16:10
-```
+- Review the workflow job output for API status and processing errors.
+- Do not expose credentials while debugging.
+- Avoid repeated publish attempts when Partner Center reports that another submission is already in progress.
 
-Microsoft Edge Add-ons API keys do not auto-renew from this project. Before expiry, manually create/renew the API key in Partner Center and update this GitHub secret:
-
-```text
-https://github.com/Bl0ck154/ChromeExtensionEtsyAI/settings/secrets/actions/EDGE_API_KEY
-```
-
-Renew from Partner Center Publish API:
-
-```text
-https://partner.microsoft.com/en-us/dashboard/microsoftedge/publishapi
-```
-
-Reminder:
-
-```text
-Renew EDGE_API_KEY before 2026-10-06 16:10.
-```
-
-Partner Center:
-
-```text
-https://partner.microsoft.com/dashboard/microsoftedge/public/login
-```
-
-Path:
-
-```text
-Microsoft Edge -> Publish API -> API Keys
-```
-
-## Important Limits
-
-This automation publishes through the Edge Add-ons pipeline. It does not bypass Microsoft review/processing, and it does not update extension code directly from GitHub.
-
-Fast no-store updates for agent behavior are handled separately by `src/config/agent_policy.json` remote policy, which can update prompts/rules as data only.
+This workflow does not bypass Microsoft review or store processing.

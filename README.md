@@ -1,195 +1,118 @@
-# Etsy AI Assistant 🤖
+# Etsy AI Assistant
 
-Chrome extension that integrates AI assistance directly into Etsy pages, helping shop owners manage their business more efficiently.
+A Manifest V3 browser extension that adds a context-aware AI assistant to Etsy pages and seller workflows.
 
-![Version](https://img.shields.io/badge/version-1.6.21-blue.svg)
-![Manifest](https://img.shields.io/badge/manifest-v3-green.svg)
+**Current source version:** `1.6.26`
 
-## ✨ Features
+## Features
 
-- **Floating AI Chat**: Intelligent assistant accessible from any Etsy page
-- **Page Context Aware**: Automatically extracts and analyzes page content
-- **Multi-Model Support**: Choose from various Gemini AI models
-- **Chat History**: Persistent conversation history per page
-- **Quick Replies**: Reusable templates that insert into Etsy's draft field without sending
-- **Agent-Managed Templates**: Ask the AI chat to add, edit, list, or remove quick replies
-- **Markdown Rendering**: Beautiful formatting with code blocks, tables, and lists
-- **Drag & Drop UI**: Fully customizable positioning that persists
-- **Smart Tooltips**: Context-sensitive help throughout the interface
+- Floating AI chat on Etsy pages
+- Etsy page, listing, and conversation context for more relevant answers
+- Streaming Google Gemini responses with model fallback
+- Optional custom OpenAI-compatible provider
+- Optional DeepSeek, Grok, and OpenRouter credentials for supported fallback paths
+- Reusable quick replies that are inserted as drafts and are not auto-sent
+- AI-managed quick-reply templates
+- Local agent memory and additional shop-specific instructions
+- Customer-image analysis for supported reply workflows
+- Per-conversation context isolation and local chat history
+- Chromium and Firefox builds from one source tree
 
-## 📋 Requirements
+## Privacy at a glance
 
-- Chrome browser (version 88+)
-- Google Gemini API key ([Get one here](https://makersuite.google.com/app/apikey))
+This project does not include API keys or account credentials.
 
-## 🚀 Installation
+API credentials, chat history, memories, quick replies, preferences, and cached Etsy context are stored in the browser extension's local storage. The extension does **not** add its own encryption layer around those values.
 
-### Development Installation
+When an AI feature needs Etsy context, relevant page, listing, conversation, or image data may be sent directly to the AI provider selected by the user. A custom provider sends data to the endpoint configured by the user. The project does not require a developer-operated backend for AI requests.
 
-1. **Clone or download this repository**
-   ```bash
-   git clone <your-repo-url>
-   cd ChromeExtensionEtsyAI
-   ```
+See [PRIVACY_POLICY.md](./PRIVACY_POLICY.md) for details.
 
-2. **Set up configuration (IMPORTANT)**
-   
-   The extension does NOT ship with API keys. You need to add your own:
-   
-   - Option A: Create `config.secret.json` (for development):
-     ```bash
-     cp config.example.json config.secret.json
-     ```
-     Then edit `config.secret.json` and add your Google API key.
-     
-   - Option B: Use the Settings UI (recommended for end users):
-     Just install the extension and click the Settings ⚙️ button to add your API key.
+## Requirements
 
-3. **Load extension in Chrome**
-   - Open Chrome and navigate to `chrome://extensions/`
-   - Enable "Developer mode" (toggle in top-right)
-   - Click "Load unpacked"
-   - Select the `ChromeExtensionEtsyAI/src` folder
+- Chromium-based browser with Manifest V3 support, or Firefox 109+
+- An API key for the AI provider you want to use
+- Windows if you want to use the included `build.bat` cross-browser build script
 
-4. **Test the extension**
-   - Visit any Etsy page (e.g., https://www.etsy.com/)
-   - Look for the floating 🤖 button in the bottom-right corner
-   - Click it to open the AI chat interface
+## Install from source
 
-## ⚙️ Configuration
+### Chromium (Chrome / Edge)
 
-### API Key Setup
-
-**Using Settings UI** (Recommended)
-1. Click the 🤖 button to open the chat
-2. Click the Settings ⚙️ icon
-3. Enter your Google API key
-4. Click "Save Settings"
-
-API keys are stored securely in `chrome.storage.local`.
-
-### Model Configuration
-
-Models are configured in `content/config.js`. To add or change models:
-1. Edit `content/config.js`
-2. Modify the `models` array
-3. Set `defaultModel` to your preferred model ID
-4. Reload the extension
-
-**Current default model**: `gemini-flash-latest`
-
-Gemini thinking is adaptive. Simple requests use `minimal`, medium-context requests use `medium`, and complex/important requests (including internal briefs / ТЗ) use `high`. The Gemini 2.5 fallback uses equivalent legacy numeric budgets.
-
-## 🎯 Usage
-
-### Basic Chat
-1. Click the 🤖 button to open the chat
-2. Type your question or request
-3. Press Enter or click Send
-4. The AI will analyze the current Etsy page and respond
-
-### Quick Actions
-- **AI Actions**: Suggest, rewrite, translate, summarize, or risk-check a reply
-- **Quick Replies**: Select a saved template above Etsy's message field; it is inserted as an unsent draft
-- **Manage Templates**: Click `Manage` beside the templates, or ask the AI chat to add/edit/list/remove one
-- **History**: View and restore previous chat sessions
-- **New Chat**: Start a fresh conversation
-
-### Page Context
-The extension automatically extracts:
-- Page title and metadata
-- Main content (using Readability)
-- Formatted as clean Markdown for better AI understanding
-
-## 🏗️ Architecture
-
-See [ARCHITECTURE.md](./ARCHITECTURE.md) for detailed technical documentation.
-
-**Key Components:**
-- `content/content.js` - Page content extraction
-- `content/chat_ui.js` - Floating chat interface
-- `content/base_ai_service.js` - Base abstract class for AI providers
-- `content/ai_service_factory.js` - Factory for selecting AI providers
-- `content/providers/` - AI service implementations (Gemini, DeepSeek, Grok)
-- `content/page_parser.js` - HTML to Markdown conversion
-- `background/service_worker.js` - Background context storage
-
-## 🛠️ Development
-
-### Project Structure
-```
-ChromeExtensionEtsyAI/
-├── manifest.json          # Extension configuration
-├── config.example.json    # API key template
-├── background/
-│   └── service_worker.js  # Background script
-├── content/
-│   ├── config.js          # Model configuration
-│   ├── content.js         # Content script entry
-│   ├── chat_ui.js         # Floating chat UI
-│   ├── chat_ui.css        # Chat styling
-│   ├── image_modal.css    # Image modal styling
-│   ├── image_modal.js     # Image download modal
-│   ├── chat_manager.js    # Chat history management
-│   ├── page_parser.js     # Page content extraction
-│   ├── base_ai_service.js      # Base AI service (abstract class)
-│   ├── ai_service_factory.js   # AI provider factory
-│   ├── providers/         # AI service providers
-│   │   ├── gemini_service.js   # Google Gemini AI
-│   │   ├── deepseek_service.js # DeepSeek AI
-│   │   └── grok_service.js     # Grok AI
-│   └── ui.html            # Chat HTML template
-└── libs/
-    ├── Readability.min.js # Mozilla Readability
-    └── turndown.js        # HTML to Markdown
+```bash
+git clone https://github.com/Bl0ck154/ChromeExtensionEtsyAI.git
+cd ChromeExtensionEtsyAI
 ```
 
-### Building & Testing
+Then:
 
-Run `cmd /c build.bat` to generate the Chromium package in `dist/chrome` and the Firefox package in
-`dist/firefox`.
+1. Open `chrome://extensions/` (or `edge://extensions/`).
+2. Enable Developer mode.
+3. Choose **Load unpacked**.
+4. Select the `src` directory.
+5. Open the extension settings and add your own provider credentials.
 
-**To test changes:**
-1. Make your code changes
-2. Go to `chrome://extensions/`
-3. Click the "Reload" icon on the extension card
-4. Test on an Etsy page
+### Firefox development build
 
-### Code Quality
+Run:
 
-Before committing:
-- Ensure `config.secret.json` is gitignored
-- Test all features manually (see Verification Plan in implementation_plan.md)
-- Check browser console for errors
+```cmd
+build.bat
+```
 
-## 🤝 Contributing
+Then load `dist/firefox/manifest.json` from `about:debugging#/runtime/this-firefox`, or use the generated XPI for your normal signing/release workflow.
 
-Contributions are welcome! Please:
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Test thoroughly
-5. Submit a pull request
+## Build
 
-## 📝 License
+`src/manifest.json` is the manifest source of truth.
 
-[Add your license here]
+```cmd
+build.bat
+```
 
-## ⚠️ Disclaimer
+The build script creates:
 
-This extension is not affiliated with Etsy. Use at your own discretion.
+- `dist/chrome/` — Chromium package contents
+- `dist/firefox/` — Firefox-compatible package contents
+- `dist/etsy-ai-assistant-firefox-<version>.xpi` — packaged Firefox build
 
-## 🔒 Security & Privacy
+The legacy `manifests/` directory is intentionally not used.
 
-- API keys are stored locally in Chrome's storage (never transmitted to third parties)
-- All AI requests go directly to Google's Gemini API
-- No data is collected or stored by the extension developer
-- Page content is only sent to the AI when you explicitly interact with the chat
+More details: [BUILD_INSTRUCTIONS.md](./BUILD_INSTRUCTIONS.md).
 
-## 📞 Support
+## Project layout
 
-[Add support information here - issues, email, etc.]
+```text
+src/
+  background/   service worker and privileged browser operations
+  config/       assistant behavior policy and base instruction
+  content/      Etsy integration, context, AI providers, UI, guards
+  libs/         vendored browser-side libraries
+  offscreen/    Chromium offscreen parsing support
+  options/      settings UI
 
----
+tests/          unit/integration tests and synthetic fixtures
+.github/        store release workflows
+```
 
-Made with ❤️ for Etsy shop owners
+See [ARCHITECTURE.md](./ARCHITECTURE.md) for the current data flow and trust boundaries.
+
+## Security
+
+- Never commit API keys, store credentials, cookies, browser profiles, Etsy exports, or real customer conversation fixtures.
+- Use synthetic data in tests.
+- Release credentials belong in GitHub Actions secrets, not repository files.
+- A custom provider requires optional host access because its hostname is chosen by the user at runtime.
+
+Please read [SECURITY.md](./SECURITY.md) before reporting a security issue.
+
+## Contributing
+
+Contributions are welcome. See [CONTRIBUTING.md](./CONTRIBUTING.md).
+
+## Disclaimer
+
+This project is not affiliated with, endorsed by, or sponsored by Etsy. Etsy pages and APIs can change, which may break integration behavior.
+
+## License
+
+MIT — see [LICENSE](./LICENSE).

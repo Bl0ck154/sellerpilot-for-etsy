@@ -1,385 +1,136 @@
-# Architecture Documentation
+# Architecture
 
 ## Overview
 
-Etsy AI Assistant is a Chrome Manifest V3 extension that provides context-aware AI assistance for Etsy pages. The extension uses a content script architecture with a floating chat interface.
+Etsy AI Assistant is a Manifest V3 browser extension. Most application logic runs as Etsy content scripts, while a background service worker performs operations that require extension privileges or cross-origin access.
 
-## Architecture Diagram
+`src/manifest.json` is the source-of-truth manifest. Chromium builds copy `src/` directly; the Firefox build derives its manifest from the same source and applies browser-specific changes.
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                        Etsy Page                             │
-│  ┌───────────────────────────────────────────────────────┐  │
-│  │  Content Scripts (injected into page)                 │  │
-│  │  ┌──────────────┐  ┌──────────────┐  ┌─────────────┐ │  │
-│  │  │page_parser.js│  │ai_service.js │  │content.js   │ │  │
-│  │  │(HTML→MD)     │──│(Gemini API)  │──│(Extraction) │ │  │
-│  │  └──────────────┘  └──────────────┘  └─────────────┘ │  │
-│  │         │                  │                 │        │  │
-│  │         └──────────────────┴─────────────────┘        │  │
-│  │                         │                             │  │
-│  │                  ┌──────▼─────────┐                   │  │
-│  │                  │  chat_ui.js    │                   │  │
-│  │                  │ (Floating UI)  │                   │  │
-│  │                  └────────────────┘                   │  │
-│  └───────────────────────────────────────────────────────┘  │
-│                            │                                │
-└────────────────────────────┼────────────────────────────────┘
-                             │
-                    ┌────────▼─────────┐
-                    │  Background      │
-                    │ service_worker.js│
-                    │ (Context Store)  │
-                    └──────────────────┘
-                             │
-                    ┌────────▼─────────┐
-                    │ chrome.storage   │
-                    │  - API keys      │
-                    │  - Chat history  │
-                    │  - Preferences   │
-                    └──────────────────┘
+## High-level data flow
+
+```text
+Etsy page
+   |
+   | DOM / page state / Etsy conversation context
+   v
+Content scripts
+   |-- page + listing context
+   |-- conversation isolation
+   |-- quick replies / memory
+   |-- agent policy + safety/output guards
+   |-- image/shop intelligence
+   |-- chat UI
+   |
+   +-----------> chrome.storage.local
+   |
+   +-----------> AI provider request
+                      |
+                      +-- Google Gemini (default)
+                      +-- optional provider/fallback integrations
+                      +-- user-configured OpenAI-compatible endpoint
+
+Content scripts <----> background service worker
+                         |-- privileged network requests
+                         |-- downloads
+                         |-- offscreen coordination
+                         |-- custom-provider streaming
 ```
 
-## Component Details
+## Main components
 
-### 1. Content Scripts
+### `src/content/`
 
-Content scripts run in the context of Etsy pages. They have access to the DOM but run in an isolated JavaScript environment.
+The content-script layer contains the Etsy integration and most user-facing behavior.
 
-#### `content/content.js`
-**Purpose**: Main content script coordinator
-- **Responsibilities**:
-  - Monitors page changes (SPA navigation)
-  - Extracts page content using PageParser
-  - Sends page context to background script
-  - Manages extension lifecycle (handles context invalidation)
-- **Key Functions**:
-  - `attemptExtraction()` - Extracts and sends page data
-  - MutationObserver - Watches for DOM changes
-  - URL change detection via interval
+Important groups include:
 
-#### `content/page_parser.js`
-**Purpose**: Convert HTML to clean Markdown
-- **Dependencies**: 
-  - Mozilla Readability (libs/Readability.min.js)
-  - Turndown (libs/turndown.js)
-- **Process**:
-  1. Clone document to avoid modifying visible page
-  2. Remove noise (nav, footer, scripts, styles)
-  3. Extract main content
-  4. Convert HTML → Markdown
-  5. Clean up formatting
-- **Exports**: `window.PageParser` with `getFullPageData()`
+- `content.js` and page/parser modules — page lifecycle and context extraction
+- `etsy_context_interceptor.js` — Etsy conversation/context capture
+- `listing_editor_tracker.js` and `link_discovery.js` — listing-aware context
+- `conversation_context_manager.js` — conversation-scoped state
+- `memory_manager.js` — durable local assistant memory
+- `quick_reply_manager.js` / `quick_reply_ui.js` — reusable draft-only replies
+- `base_ai_service.js` / `ai_service_factory.js` — common AI request layer
+- `providers/` — Gemini and optional provider implementations
+- `agent_*` modules — context, scope, management, output, vision, and prompt guards
+- `chat_manager.js` / `chat_ui.js` — local assistant history and UI
 
-#### `content/ai_service.js`
-**Purpose**: Gemini API integration
-- **Responsibilities**:
-  - Build conversation history from chrome.storage
-  - Construct system instructions with page context
-  - Make streaming API calls to Gemini
-  - Handle API responses and errors
-- **Key Methods**:
-  - `buildConversationHistory(userId, currentMessage)` - Loads chat history
-  - `constructPromptData(context, userQuery)` - Builds prompts
-  - `callGeminiStreamingAPI()` - Streams AI responses
-- **Storage**: Reads API keys from chrome.storage (not from files)
+### `src/background/service_worker.js`
 
-#### `content/chat_ui.js`
-**Purpose**: Floating chat interface
-- **Responsibilities**:
-  - Inject UI HTML and CSS
-  - Handle user interactions (send message, settings, history)
-  - Render markdown responses
-  - Manage drag & drop positioning
-  - Tooltips and visual feedback
-- **Key Features**:
-  - Drag & drop for button and chat window
-  - Edge-based positioning (saves distance from nearest edge)
-  - Session management (save/restore chat sessions)
-  - Markdown parser (custom implementation)
-  - Copy-to-clipboard for code blocks
-- **Storage Used**:
-  - Local storage for UI positions
-  - chrome.storage for chat history and API keys
+The service worker handles operations that should not be performed directly by the Etsy page content-script context, including privileged requests, downloads, offscreen coordination, and custom-provider network access.
 
-### 2. Background Script
+### `src/options/`
 
-#### `background/service_worker.js`
-**Purpose**: Lightweight context storage
-- **Current Functionality**:
-  - Listens for `ETSY_DATA_PARSED` messages
-  - Stores current page context in chrome.storage.local
-- **Storage Key**: `current_context` - Contains latest page data
+The settings UI stores provider credentials and user preferences in extension-local storage. It also exposes memory, quick replies, custom instructions, and custom-provider configuration.
 
-**Note**: This is a minimal implementation. The background script doesn't do heavy processing since everything happens in content scripts.
+### `src/config/`
 
-### 3. Libraries
+- `base_instruction.js` — stable assistant instruction
+- `agent_policy.json` — public behavior-policy data that can be fetched from this repository
 
-#### `libs/Readability.min.js`
-- **Source**: [Mozilla Readability](https://github.com/mozilla/readability)
-- **Purpose**: Extract main content from web pages
-- **Usage**: PageParser uses it to get clean article text
+The remote policy is data, not executable extension code.
 
-#### `libs/turndown.js`
-- **Source**: [Turndown](https://github.com/mixmark-io/turndown)
-- **Purpose**: Convert HTML to Markdown
-- **Usage**: PageParser converts extracted HTML to markdown
+## Storage and privacy boundaries
 
-## Data Flow
+The extension uses `chrome.storage.local` for local state such as:
 
-### Page Load Flow
-```
-1. User visits Etsy page
-   ↓
-2. content.js injects (manifest)
-   ↓
-3. page_parser.js & ai_service.js load
-   ↓
-4. chat_ui.js injects floating UI
-   ↓
-5. content.js extracts page → PageParser
-   ↓
-6. Sends to background → chrome.storage
-   ↓
-7. UI updates status indicator
-```
+- provider credentials and settings;
+- assistant/chat history;
+- user memory and additional instructions;
+- quick replies;
+- cached Etsy context and derived summaries;
+- UI/configuration state.
 
-### Chat Interaction Flow
-```
-1. User types message in chat_ui
-   ↓
-2. chat_ui loads conversation history (chrome.storage)
-   ↓
-3. Calls ai_service.buildConversationHistory()
-   ↓
-4. Adds current page context as system instruction
-   ↓
-5. ai_service calls Gemini streaming API
-   ↓
-6. Streams chunks → chat_ui renders markdown
-   ↓
-7. Complete message saved to chrome.storage
-```
+The extension does not add application-level encryption around browser-local values. Security therefore depends in part on the browser profile and operating-system account.
 
-## Storage Schema
+Relevant Etsy content can leave the browser when it is included in an AI request. The destination is the selected AI provider or custom endpoint, not a project-owned AI backend.
 
-### chrome.storage.local
+See [PRIVACY_POLICY.md](./PRIVACY_POLICY.md).
 
-```javascript
-{
-  // Current page context (set by background)
-  "current_context": {
-    page_content: {
-      title: string,
-      markdown: string,
-      excerpt: string,
-      siteName: string,
-      hasContent: boolean
-    },
-    metadata: {
-      url: string,
-      pathname: string,
-      title: string,
-      timestamp: string
-    },
-    page_url: string
-  },
+## Network trust boundaries
 
-  // API keys (set by user via Settings)
-  "custom_api_keys": {
-    google: string
-  },
+### Etsy
 
-  // User preferences
-  "preferred_model": string,  // e.g. "gemini-1.5-flash"
+Content scripts execute only on the Etsy hosts declared in the manifest and read page/context data required by enabled features.
 
-  // Chat history (per page URL hash)
-  "history_<URL_HASH>": [
-    {
-      text: string,
-      type: "user" | "ai" | "system",
-      timestamp: string (ISO)
-    }
-  ],
+### AI providers
 
-  // Session index (all saved sessions)
-  "sessions_index_all": [
-    {
-      id: string,
-      name: string,
-      pageTitle: string,
-      pageUrl: string,
-      timestamp: string (ISO),
-      messageCount: number,
-      messages: Array<HistoryMessage>
-    }
-  ]
-}
-```
+Provider requests are made over HTTPS, except that a user-configured custom endpoint may use HTTP for local loopback addresses. Custom endpoint URLs are validated before use.
 
-### localStorage (for UI state)
+Because a custom provider's hostname cannot be known at install time, the extension declares broad **optional** HTTPS host permission. That permission exists for user-selected endpoints and is not equivalent to a content script running on every website.
 
-```javascript
-{
-  "etsy-ai-btn-position": {
-    edge: "left" | "right",
-    edgeDistance: number,
-    verticalEdge: "top" | "bottom",
-    verticalDistance: number
-  },
-  "etsy-ai-chat-position": { /* same structure */ }
-}
-```
+### GitHub-hosted agent policy
 
-## Security Considerations
+The extension may fetch `src/config/agent_policy.json` from the public repository. The request is for policy text only; Etsy conversation data, provider keys, and local history are not part of the policy fetch.
 
-### API Key Protection
+## Agent hardening
 
-**Before (INSECURE)**:
-- `config.secret.json` was in `web_accessible_resources`
-- Any webpage could read it via `chrome.runtime.getURL()`
+The current branch includes explicit guard layers around AI context and actions. Their purpose is to keep page data, user instructions, inferred context, management actions, and model output within defined trust/scope boundaries.
 
-**After (SECURE)**:
-- API keys stored in `chrome.storage.local`
-- Only extension code can access
-- User enters key via Settings UI
+These guards reduce risk but are not a proof that AI output is always correct or safe. Customer-facing text should still be reviewed before sending.
 
-### Content Security
+## Draft-only behavior
 
-- Content scripts run in isolated world (separate from page JS)
-- Page cannot access extension storage or APIs
-- Extension cannot be compromised by malicious Etsy pages
+Quick replies and generated reply text are designed to populate a draft rather than automatically send a customer message. This keeps the seller in the approval loop.
 
-### Data Privacy
+## Browser builds
 
-- All page content stays local until user initiates chat
-- AI requests go directly to Google Gemini (no middleman)
-- No telemetry or analytics
-- Chat history stored locally (not synced)
+### Chromium
 
-## Extension Lifecycle
+`build.bat` copies `src/` to `dist/chrome/`.
 
-### Installation
-1. User loads extension
-2. Manifest registered with Chrome
-3. Background service worker starts (dormant until needed)
+### Firefox
 
-### Page Visit
-1. Content scripts injected (manifest match pattern)
-2. Scripts execute in order (manifest.content_scripts.js array)
-3. UI appears after initialization
+`build-firefox-manifest.ps1` reads `src/manifest.json`, removes unsupported Chromium-specific permission(s), converts the background declaration, and adds Firefox-specific settings before packaging.
 
-### Extension Update/Reload
-**Problem**: Extension context can be invalidated mid-execution
+The old hand-maintained browser-specific manifests were removed to avoid configuration drift.
 
-**Solution**: Defensive checks
-```javascript
-// Before any chrome.* API call:
-if (!chrome.runtime?.id) {
-  // Extension was reloaded, stop execution
-  return;
-}
-```
+## Tests
 
-Used in:
-- `content.js` - Before sendMessage
-- `chat_ui.js` - Before storage operations
+Tests live in `tests/`. Fixtures must be synthetic and must not contain real Etsy customer names, messages, order details, attachments, cookies, or account data.
 
-## Performance Considerations
+## Release automation
 
-### Page Parsing
-- **Cost**: Readability + Turndown on every page load
-- **Mitigation**: 
-  - Only parse once per page
-  - Use hash comparison to avoid re-parsing identical content
-  - Debounce DOM mutations (1 second)
+GitHub Actions workflows can package and publish Chromium builds to browser stores. Store credentials are referenced through GitHub Actions secrets and must never be committed to the repository.
 
-### Chat History
-- **Cost**: Loading message history from storage
-- **Mitigation**:
-  - Limit to 50 messages per session
-  - Use URL hash for efficient lookups
-  - Lazy load old sessions (only on History open)
-
-### API Calls
-- **Rate Limits**: Gemini API has quotas
-- **Mitigation**:
-  - Use streaming to show progress
-  - Cache conversation history
-  - Client-side validation before sending
-
-## Future Improvements
-
-### Code Duplication (Planned)
-Currently there's significant duplication between `chat_ui.js` and removed `sidepanel.js`. Both implemented identical:
-- Configuration loading
-- Chat logic
-- History management
-- Markdown parsing
-
-**Plan**: Create `ChatController` module to share logic.
-
-### Suggested Architecture
-```
-content/
-  ├── chat_controller.js  (shared logic)
-  ├── chat_ui.js         (UI only, uses controller)
-  └── ai_service.js      (kept separate)
-```
-
-## Debugging
-
-### Enable Detailed Logging
-Content scripts log to the page's console (Dev Tools)
-
-### Inspect Storage
-- `chrome.storage`: DevTools → Application → Storage → Extension
-- `localStorage`: DevTools → Application → Local Storage
-
-### Reload Extension
-After code changes:
-1. chrome://extensions/
-2. Click reload icon
-3. Refresh Etsy page
-
-### Common Issues
-
-**Chat not appearing**:
-- Check console for errors
-- Verify manifest permissions
-- Check if content scripts loaded
-
-**API errors**:
-- Verify API key in Settings
-- Check Network tab for API responses
-- Look for quota exceeded errors
-
-**Context not updating**:
-- Check background service worker console
-- Verify storage.local has `current_context`
-- Look for extension context invalidation warnings
-
-## Technology Stack
-
-- **JavaScript**: ES6+ (Chrome 88+ support)
-- **CSS**: Vanilla CSS (no preprocessors)
-- **APIs**:
-  - Chrome Extension APIs (manifest v3)
-  - Google Gemini AI API
-  - Fetch API for HTTP requests
-- **Libraries**:
-  - Mozilla Readability
-  - Turndown
-- **Storage**:
-  - chrome.storage.local (extension data)
-  - localStorage (UI state)
-
-## Browser Compatibility
-
-- **Minimum**: Chrome 88 (Manifest V3 support)
-- **Recommended**: Chrome 100+
-- **Not Supported**: Firefox, Safari, Edge (Chromium Edge may work but untested)
-
----
-
-For implementation details, see code comments in individual files.
+Release workflows should only be triggered intentionally by a maintainer.
