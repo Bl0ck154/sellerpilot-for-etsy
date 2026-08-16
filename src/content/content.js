@@ -1,11 +1,7 @@
-// content.js - Lazy Context Parsing
-// Парсимо контекст ТІЛЬКИ коли потрібно (on-demand), не постійно у фоні
-
-// === CACHE MANAGEMENT ===
+// content.js - Lazy page-context parsing with SPA-safe cache invalidation.
 let contextCache = null;
 let cacheTimestamp = 0;
-const CACHE_TTL = 5000; // 5 seconds
-
+const CACHE_TTL = 5000;
 let chatManagerInitialized = false;
 
 function invalidateContextCache() {
@@ -13,23 +9,35 @@ function invalidateContextCache() {
     cacheTimestamp = 0;
 }
 
-// === CORE FUNCTION: Get Context with Cache ===
+function contextMatchesCurrentUrl(context) {
+    if (!context) return false;
+    const url = context.metadata?.url || context.page_url || '';
+    if (!url) return false;
+    try {
+        return new URL(url, location.href).pathname === location.pathname;
+    } catch (_) {
+        return false;
+    }
+}
+
 function getContextWithCache() {
-    // 1. Check if extension is alive
     if (!chrome.runtime?.id) {
         console.log('⛔ Extension context invalidated. Cannot extract.');
         return null;
     }
 
-    // 2. Check cache
     const now = Date.now();
-    if (contextCache && (now - cacheTimestamp) < CACHE_TTL) {
+    if (contextCache &&
+        now - cacheTimestamp < CACHE_TTL &&
+        contextMatchesCurrentUrl(contextCache)) {
         return contextCache;
     }
 
-    // 3. Extract fresh context
-    const pageData = window.PageParser ? window.PageParser.getFullPageData() : null;
+    // A URL change invalidates the cache even if Etsy changed it through pushState and
+    // the explicit navigation event was delayed/missed.
+    if (contextCache && !contextMatchesCurrentUrl(contextCache)) invalidateContextCache();
 
+    const pageData = window.PageParser?.getFullPageData?.() || null;
     if (!pageData) {
         console.log('⚠️ PageParser not ready or no content found');
         return null;
@@ -47,59 +55,56 @@ function getContextWithCache() {
         page_url: window.location.href
     };
 
-    // 4. Update cache
     contextCache = data;
     cacheTimestamp = now;
-
     return data;
 }
 
-// === NAVIGATION EVENT LISTENERS (Cache Invalidation) ===
-window.addEventListener('popstate', () => {
+function handleLocationChange() {
     invalidateContextCache();
-});
 
-window.addEventListener('hashchange', () => {
-    invalidateContextCache();
-});
-
-// === MESSAGE LISTENERS ===
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    // On-demand context request
-    if (request.action === "GET_FRESH_CONTEXT") {
+    // Keep the shared page snapshot aligned with the live SPA route. Consumers also
+    // perform their own scope checks, so a failed parse simply leaves context unavailable.
+    setTimeout(() => {
         const context = getContextWithCache();
-        sendResponse({ context: context });
-        return true; // Keep channel open for async
-    }
-
-    // Legacy refresh support (now does the same as GET_FRESH_CONTEXT)
-    if (request.action === "refresh_context") {
-        const context = getContextWithCache();
-
-        // Also send to background for storage (legacy compatibility)
-        if (context) {
-            chrome.runtime.sendMessage({
-                type: "ETSY_DATA_PARSED",
-                payload: context
-            }, () => {
-                if (chrome.runtime.lastError) {
-                    // Ignore - background may not be listening
-                }
-            });
+        if (context && chrome.runtime?.id) {
+            chrome.storage.local.set({ current_context: context }).catch?.(() => {});
         }
+    }, 100);
+}
 
-        sendResponse({ status: "Refreshed", context: context });
+window.addEventListener('popstate', handleLocationChange);
+window.addEventListener('hashchange', handleLocationChange);
+window.addEventListener('etsy-ai-locationchange', handleLocationChange);
+
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    if (request.action === 'GET_FRESH_CONTEXT') {
+        sendResponse({ context: getContextWithCache() });
         return true;
     }
 
-    // Handle Chat Manager toggle from options page
-    if (request.type === "CHAT_MANAGER_TOGGLE") {
+    if (request.action === 'refresh_context') {
+        const context = getContextWithCache();
+        if (context) {
+            chrome.runtime.sendMessage({
+                type: 'ETSY_DATA_PARSED',
+                payload: context
+            }, () => {
+                if (chrome.runtime.lastError) {
+                    // Background compatibility message is best-effort.
+                }
+            });
+        }
+        sendResponse({ status: 'Refreshed', context });
+        return true;
+    }
+
+    if (request.type === 'CHAT_MANAGER_TOGGLE') {
         toggleChatManager(request.enabled);
-        sendResponse({ status: "Chat Manager toggled" });
+        sendResponse({ status: 'Chat Manager toggled' });
     }
 });
 
-// === CHAT MANAGER INTEGRATION ===
 function toggleChatManager(enabled) {
     if (enabled && !chatManagerInitialized) {
         if (window.EtsyChatManager) {
@@ -114,24 +119,18 @@ function toggleChatManager(enabled) {
     }
 }
 
-// Initialize Chat Manager on load if enabled
-chrome.storage.sync.get(['chatManagerEnabled'], (result) => {
-    const isEnabled = result.chatManagerEnabled !== undefined ? result.chatManagerEnabled : true;
+chrome.storage.sync.get(['chatManagerEnabled'], result => {
+    const isEnabled = result.chatManagerEnabled !== undefined
+        ? result.chatManagerEnabled
+        : true;
 
     if (isEnabled) {
-        // Wait for EtsyChatManager to be available
         const checkAndInit = () => {
-            if (window.EtsyChatManager) {
-                toggleChatManager(true);
-            } else {
-                setTimeout(checkAndInit, 100);
-            }
+            if (window.EtsyChatManager) toggleChatManager(true);
+            else setTimeout(checkAndInit, 100);
         };
         checkAndInit();
     }
 });
 
-// === EXPORT FOR CHAT_UI ===
-// Export function globally so chat_ui.js can call it directly
 window.EtsyAI_GetFreshContext = getContextWithCache;
-
