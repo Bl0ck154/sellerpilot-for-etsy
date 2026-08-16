@@ -1,7 +1,7 @@
 {
     "manifest_version": 3,
     "name": "Etsy AI Assistant",
-    "version": "1.6.24",
+    "version": "1.6.25",
     "description": "AI assistant integrated into Etsy pages",
     "permissions": [
         "scripting",
@@ -60,7 +60,8 @@
                 "content/image_modal.js",
                 "content/chat_manager.js",
                 "content/content.js",
-                "content/chat_ui.js"
+                "content/chat_ui.js",
+                "content/chat_submission_guard.js"
             ],
             "css": [
                 "content/chat_ui.css",
