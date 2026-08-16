@@ -117,9 +117,14 @@ window.EtsyContextInterceptor = (function () {
         }
 
         if (!isLiveConversation(convoId)) return false;
-        window.ImageIntelligenceManager?.analyzeCurrentCustomerImages?.().catch(error => {
-            console.warn('ImageIntelligence: background analysis failed', error);
-        });
+
+        // Analyze every newly received customer image after listing context is ready.
+        // The image manager itself is additionally guarded against cross-conversation scope.
+        if (window.ImageIntelligenceManager?.analyzeCurrentCustomerImages) {
+            window.ImageIntelligenceManager.analyzeCurrentCustomerImages().catch(error => {
+                console.warn('ImageIntelligence: background analysis failed', error);
+            });
+        }
         return true;
     }
 
