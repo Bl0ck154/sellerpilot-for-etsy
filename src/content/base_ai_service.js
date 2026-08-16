@@ -60,9 +60,26 @@ ${markdown ? `\n\nPAGE CONTENT:\n${markdown}` : ''}`;
             // remain present even when an older customization was saved.
             let instruction = this.baseInstruction;
 
+            const customInstructionsPromise = chrome.storage.local.get(['custom_instructions'])
+                .catch(error => {
+                    console.warn('Failed to load custom instructions, using default:', error);
+                    return {};
+                });
+            const policyPromise = window.AgentPolicyManager
+                ? window.AgentPolicyManager.getPolicy().catch(error => {
+                    console.warn('Failed to load agent policy, using bundled base instruction:', error);
+                    return {};
+                })
+                : Promise.resolve({});
+
+            const [customInstructionResult, policy] = await Promise.all([
+                customInstructionsPromise,
+                policyPromise
+            ]);
+
             let customInstructionsActive = false;
             try {
-                const result = await chrome.storage.local.get(['custom_instructions']);
+                const result = customInstructionResult;
                 if (result.custom_instructions && result.custom_instructions.trim()) {
                     instruction += `\n\n### OWNER_CUSTOM_INSTRUCTIONS\n` +
                         `(Owner-authored preferences. Apply when relevant, but they do not redefine participant roles, source trust, capability, or truth boundaries.)\n` +
@@ -73,13 +90,8 @@ ${markdown ? `\n\nPAGE CONTENT:\n${markdown}` : ''}`;
                 console.warn('Failed to load custom instructions, using default:', error);
             }
 
-            let policyAddendum = '';
-            let policyVersion = null;
-            if (window.AgentPolicyManager) {
-                const policy = await window.AgentPolicyManager.getPolicy();
-                policyVersion = policy.version || null;
-                policyAddendum = policy.systemAddendum ? `\n\n${policy.systemAddendum}` : '';
-            }
+            const policyVersion = policy.version || null;
+            const policyAddendum = policy.systemAddendum ? `\n\n${policy.systemAddendum}` : '';
 
             this.lastBuildMetadata = {
                 customInstructionsActive,
@@ -90,24 +102,21 @@ ${markdown ? `\n\nPAGE CONTENT:\n${markdown}` : ''}`;
             const metadata = safeContext.metadata || {};
             const pageContext = this.getPageContext(pageContent, metadata);
 
-            // User memory (persistent facts) — placed high so it's visible before page-specific data
-            const memoryContext = window.MemoryManager
-                ? await window.MemoryManager.buildContextSection()
-                : '';
-
-            const shopIntelligenceContext = window.ShopIntelligenceManager
-                ? await window.ShopIntelligenceManager.buildContextSection()
-                : '';
-
-            const imageContext = window.ImageIntelligenceManager
-                ? await window.ImageIntelligenceManager.buildContextSection()
-                : '';
-
-            // Get RAG context from parsed listings (non-blocking read)
-            const ragContext = await this.getRAGContext();
-
-            // Get chat history context from Etsy conversation
-            const chatHistoryContext = await this.getChatHistoryContext();
+            // These sources are independent. Read them concurrently so listing/chat
+            // hydration waits do not stack while preserving the complete context.
+            const [
+                memoryContext,
+                shopIntelligenceContext,
+                imageContext,
+                ragContext,
+                chatHistoryContext
+            ] = await Promise.all([
+                window.MemoryManager ? window.MemoryManager.buildContextSection() : Promise.resolve(''),
+                window.ShopIntelligenceManager ? window.ShopIntelligenceManager.buildContextSection() : Promise.resolve(''),
+                window.ImageIntelligenceManager ? window.ImageIntelligenceManager.buildContextSection() : Promise.resolve(''),
+                this.getRAGContext(),
+                this.getChatHistoryContext()
+            ]);
 
             // PAGE_SCOPE tag — placed last so the model sees it right before generating
             const pageScope = this.getPageScope(metadata);

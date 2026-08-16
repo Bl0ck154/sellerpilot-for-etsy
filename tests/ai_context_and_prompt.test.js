@@ -190,7 +190,11 @@ const instructions = context.window.BaseAIService.INSTRUCTIONS;
 
     const chatUiSource = read('src/content/chat_ui.js');
     assert.match(chatUiSource, /Use semantic intent, not keyword matching/);
-    assert.match(chatUiSource, /analyzeCurrentCustomerImages/);
+    assert.match(
+        read('src/content/etsy_context_interceptor.js'),
+        /Analyze every newly received customer image[\s\S]*?analyzeCurrentCustomerImages\(\)/,
+        'vision analysis starts from background conversation ingestion, not message submission'
+    );
     assert.doesNotMatch(chatUiSource, /shouldAnalyzeQuickReplyIntent|IMAGE_ANALYSIS_DECISION_SYSTEM_PROMPT|detectOverpromiseRisk/);
     const quickActionsSetup = chatUiSource.slice(
         chatUiSource.indexOf('function setupQuickActionsMenu()'),
@@ -200,6 +204,37 @@ const instructions = context.window.BaseAIService.INSTRUCTIONS;
         quickActionsSetup,
         /customSettings/,
         'quick actions setup must not reference custom-provider settings outside their configuration scope'
+    );
+    const sendFlow = chatUiSource.slice(
+        chatUiSource.indexOf('async function sendMessage()'),
+        chatUiSource.indexOf('async function analyzeManagementIntent(')
+    );
+    const synchronousClearIndex = sendFlow.indexOf('ELEMENTS.userInput.textContent = ""');
+    const managementRoutingIndex = sendFlow.indexOf('await analyzeManagementIntent(text)');
+    assert.notEqual(synchronousClearIndex, -1, 'typed submission must synchronously clear the composer');
+    assert.notEqual(managementRoutingIndex, -1, 'semantic management routing remains available');
+    assert.ok(
+        synchronousClearIndex < managementRoutingIndex,
+        'Enter must clear the composer synchronously before semantic management routing starts'
+    );
+    const interactionFlow = chatUiSource.slice(
+        chatUiSource.indexOf('async function handleChatInteraction('),
+        chatUiSource.indexOf('function setProcessingState(')
+    );
+    assert.doesNotMatch(
+        interactionFlow,
+        /analyzeCurrentCustomerImages|Image analysis continues in the background|onStatus:\s*showAiStatus/,
+        'sending a message must never start or await vision analysis or expose its technical status'
+    );
+    assert.match(
+        interactionFlow,
+        /Promise\.all\(\[\s*aiService\.buildConversationHistory[\s\S]*?aiService\.constructPromptData/,
+        'assistant history and prompt context should be prepared concurrently'
+    );
+    assert.match(
+        read('src/content/base_ai_service.js'),
+        /These sources are independent[\s\S]*?Promise\.all\(\[/,
+        'independent memory, shop, image, listing, and conversation context reads should not wait serially'
     );
 
     console.log('ai context and prompt tests passed');

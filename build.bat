@@ -1,5 +1,5 @@
 @echo off
-set VERSION=1.6.23
+set VERSION=1.6.24
 set FIREFOX_XPI=dist\etsy-ai-assistant-firefox-%VERSION%.xpi
 set FIREFOX_XPI_TEMP=dist\etsy-ai-assistant-firefox-%VERSION%.zip
 REM ============================================

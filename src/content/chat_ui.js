@@ -1326,7 +1326,8 @@ Prefer unclear when unsure.`;
     }
 
     // Core Chat Interaction Flow
-    async function handleChatInteraction(userMessageText, isSystemAction = false) {
+    async function handleChatInteraction(userMessageText, isSystemAction = false, options = {}) {
+        const inputAlreadyCleared = options.inputAlreadyCleared === true;
         if (viewingLegacySession) {
             addMessage('This pre-upgrade chat is read-only because its Etsy customer is unknown. Start a new chat to continue safely.', 'system');
             return;
@@ -1349,6 +1350,9 @@ Prefer unclear when unsure.`;
 
                 if (!apiKey || !apiKey.trim()) {
                     console.warn('⚠️ No API key found for provider:', provider);
+                    if (inputAlreadyCleared && !ELEMENTS.userInput.textContent.trim()) {
+                        ELEMENTS.userInput.textContent = userMessageText;
+                    }
                     ELEMENTS.sendBtn.disabled = false;
                     ELEMENTS.sendBtn.style.opacity = '1';
                     ELEMENTS.sendBtn.style.cursor = 'pointer';
@@ -1359,6 +1363,9 @@ Prefer unclear when unsure.`;
                 }
             } catch (e) {
                 console.error('Failed to get API key:', e);
+                if (inputAlreadyCleared && !ELEMENTS.userInput.textContent.trim()) {
+                    ELEMENTS.userInput.textContent = userMessageText;
+                }
                 ELEMENTS.sendBtn.disabled = false;
                 ELEMENTS.sendBtn.style.opacity = '1';
                 ELEMENTS.sendBtn.style.cursor = 'pointer';
@@ -1386,8 +1393,11 @@ Prefer unclear when unsure.`;
             console.error('⚠️ EtsyAI_GetFreshContext not available - content.js may not be loaded yet');
         }
 
-        // Clear input only after validation and scope refresh pass.
-        ELEMENTS.userInput.innerText = "";
+        // Direct chat actions clear after validation. Typed submissions are claimed
+        // synchronously in sendMessage so Enter always has immediate visual feedback.
+        if (!inputAlreadyCleared) {
+            ELEMENTS.userInput.textContent = "";
+        }
         const requestStorageKeys = getActiveChatStorageKeys();
         const requestContext = CURRENT_CONTEXT;
 
@@ -1405,11 +1415,11 @@ Prefer unclear when unsure.`;
         }
         renderMessage(userMessageText, "user");
 
+        // Give immediate progress feedback; persistence continues before the request.
+        showLoadingDots();
+
         // 3. Save User Msg to global chat
         await saveChatToStorage(userMessageText, "user", requestStorageKeys);
-
-        // Show animated loading
-        const loadingMsgId = showLoadingDots();
 
         try {
             // Get AI service instance for the SPECIFIC provider of selected model
@@ -1432,22 +1442,17 @@ Prefer unclear when unsure.`;
 
             const providerModelId = selectedOption?.dataset.model || await window.AIServiceFactory.getModelId(provider);
 
-            // Build scoped assistant history and make all customer image evidence available.
-            const conversationHistory = await aiService.buildConversationHistory(requestStorageKeys.messagesKey, userMessageText);
+            // Vision is background-only. The prompt consumes already-cached summaries.
             let imageIntelMetadata = {};
             if (window.ImageIntelligenceManager) {
-                const analysisPromise = window.ImageIntelligenceManager
-                    .analyzeCurrentCustomerImages({ onStatus: showAiStatus });
-                imageIntelMetadata = await Promise.race([
-                    analysisPromise,
-                    new Promise(resolve => setTimeout(() => {
-                        showAiStatus('Image analysis continues in the background...');
-                        resolve(window.ImageIntelligenceManager.getMetadata());
-                    }, 6000))
-                ]);
+                imageIntelMetadata = window.ImageIntelligenceManager.getMetadata();
             }
 
-            const { systemInstruction } = await aiService.constructPromptData(requestContext, userMessageText);
+            // Assistant history and Etsy/page context are independent reads.
+            const [conversationHistory, { systemInstruction }] = await Promise.all([
+                aiService.buildConversationHistory(requestStorageKeys.messagesKey, userMessageText),
+                aiService.constructPromptData(requestContext, userMessageText)
+            ]);
             const promptMetadata = BaseAIService.INSTRUCTIONS.lastBuildMetadata || {};
             const shopIntelMetadata = window.ShopIntelligenceManager
                 ? await window.ShopIntelligenceManager.getMetadata()
@@ -1545,47 +1550,43 @@ Prefer unclear when unsure.`;
             return; // Keep text in input, don't clear
         }
 
-        if (pendingMemorySuggestion) {
-            let pendingMemoryDecision = null;
-            isAnalyzingManagementIntent = true;
-            try {
-                pendingMemoryDecision = await analyzePendingMemoryDecision(text);
-            } finally {
-                isAnalyzingManagementIntent = false;
-            }
-            if (pendingMemoryDecision?.decision === 'accept' || pendingMemoryDecision?.decision === 'reject') {
-                ELEMENTS.userInput.innerText = "";
-                handlePendingMemoryDecision(text, { accept: pendingMemoryDecision.decision === 'accept' }).catch(err => {
-                    console.error('Memory decision error:', err);
-                    renderMessage(`❌ Memory error: ${err.message || err}`, "system compact");
-                });
-                return;
-            }
-        }
-
-        let managementIntent = null;
+        // Claim the submission before the first await. This removes the perceived Enter
+        // lag and makes repeated key presses harmless while semantic routing is running.
+        ELEMENTS.userInput.textContent = "";
         isAnalyzingManagementIntent = true;
+        setActionButtonsDisabled(true);
+
         try {
-            managementIntent = await analyzeManagementIntent(text);
+            if (pendingMemorySuggestion) {
+                let pendingMemoryDecision = null;
+                pendingMemoryDecision = await analyzePendingMemoryDecision(text);
+                if (pendingMemoryDecision?.decision === 'accept' || pendingMemoryDecision?.decision === 'reject') {
+                    await handlePendingMemoryDecision(text, { accept: pendingMemoryDecision.decision === 'accept' });
+                    return;
+                }
+            }
+
+            const managementIntent = await analyzeManagementIntent(text);
+
+            if (managementIntent?.domain === 'quick_reply') {
+                const handled = await handleQuickReplyIntent(text, managementIntent);
+                if (handled) return;
+            } else if (managementIntent?.domain === 'memory') {
+                const handled = await handleMemoryIntent(text, managementIntent);
+                if (handled) return;
+            }
+
+            await handleChatInteraction(text, false, { inputAlreadyCleared: true });
+        } catch (error) {
+            if (!ELEMENTS.userInput.textContent.trim()) {
+                ELEMENTS.userInput.textContent = text;
+            }
+            console.error('Failed to submit message:', error);
+            addMessage(`❌ ${error.message || error}`, 'system compact');
         } finally {
             isAnalyzingManagementIntent = false;
+            if (!isProcessing) setActionButtonsDisabled(false);
         }
-
-        if (managementIntent?.domain === 'quick_reply') {
-            const handled = await handleQuickReplyIntent(text, managementIntent);
-            if (handled) {
-                ELEMENTS.userInput.innerText = "";
-                return;
-            }
-        } else if (managementIntent?.domain === 'memory') {
-            const handled = await handleMemoryIntent(text, managementIntent);
-            if (handled) {
-                ELEMENTS.userInput.innerText = "";
-                return;
-            }
-        }
-
-        handleChatInteraction(text);
     }
 
     async function analyzeManagementIntent(text) {
