@@ -28,10 +28,31 @@
         };
     }
 
+    async function hasHydratedLiveHistory(conversationId) {
+        if (!conversationId || !chrome?.runtime?.id) return false;
+        try {
+            const result = await chrome.storage.local.get(['ETSY_CHAT_HISTORY']);
+            const history = result.ETSY_CHAT_HISTORY;
+            if (window.EtsyAgentScopeGuard?.historyMatchesLive) {
+                return window.EtsyAgentScopeGuard.historyMatchesLive(history);
+            }
+            return String(history?.convo_id || history?.conversation_id || '') === String(conversationId);
+        } catch (_) {
+            return false;
+        }
+    }
+
     manager.analyzeCurrentCustomerImages = async function (...args) {
         const conversationId = currentConversationId();
+        if (!(await hasHydratedLiveHistory(conversationId))) {
+            metadataConversationId = null;
+            return originalAnalyze(...args);
+        }
+
         const result = await originalAnalyze(...args);
-        if (conversationId && currentConversationId() === conversationId) {
+        if (conversationId &&
+            currentConversationId() === conversationId &&
+            await hasHydratedLiveHistory(conversationId)) {
             metadataConversationId = conversationId;
         }
         return result;
