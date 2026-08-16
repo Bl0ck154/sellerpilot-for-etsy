@@ -40,6 +40,10 @@ const prompt = "Classify whether the Owner's latest turn is an explicit request 
 (async () => {
     assert.equal(window.EtsyAgentManagementGate.looksLikeExplicitManagement('Напиши клієнту що все готово'), false);
     assert.equal(window.EtsyAgentManagementGate.looksLikeExplicitManagement('запамʼятай що я не даю знижки'), true);
+    assert.equal(window.EtsyAgentManagementGate.looksLikeExplicitManagement('Remember I prefer short replies'), true);
+    assert.equal(window.EtsyAgentManagementGate.looksLikeExplicitManagement('Could you remember that I ship on Mondays?'), true);
+    assert.equal(window.EtsyAgentManagementGate.looksLikeExplicitManagement('Remember what the customer said?'), false);
+    assert.equal(window.EtsyAgentManagementGate.looksLikeExplicitManagement('Do you remember what the customer said?'), false);
     assert.equal(window.EtsyAgentManagementGate.looksLikeExplicitManagement('delete my saved quick reply Thanks'), true);
     assert.equal(window.EtsyAgentManagementGate.looksLikeExplicitManagement('памʼятаєш що клієнт казав?'), false);
 
@@ -64,7 +68,6 @@ const prompt = "Classify whether the Owner's latest turn is an explicit request 
     assert.match(lastDelegatedInstruction, /action=offer is disabled/);
     assert.equal(JSON.parse(explicitRaw).action, 'none', 'unsolicited offer output is hard-normalized to none');
 
-    // The gate must not alter normal main-agent calls.
     const main = await window.AIServiceFactory.getCurrentService('gemini');
     await main.streamMessage({
         systemInstruction: 'MAIN AGENT POLICY',
