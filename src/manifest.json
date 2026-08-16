@@ -41,6 +41,7 @@
                 "content/page_parser.js",
                 "content/agent_policy_manager.js",
                 "content/gemini_auxiliary_service.js",
+                "content/agent_auxiliary_prompt_guard.js",
                 "content/shop_intelligence_manager.js",
                 "content/image_intelligence_manager.js",
                 "content/etsy_context_interceptor.js",
