@@ -36,6 +36,24 @@
         });
     }
 
+    function normalizeClassifierResult(raw) {
+        const text = String(raw || '').trim();
+        if (!text) return text;
+        try {
+            const clean = text
+                .replace(/^```json\s*/i, '')
+                .replace(/^```\s*/i, '')
+                .replace(/```\s*$/i, '')
+                .trim();
+            const parsed = JSON.parse(clean);
+            if (parsed?.action === 'offer') return noneClassification();
+            return text;
+        } catch (_) {
+            // The existing classifier parser owns malformed-output recovery.
+            return text;
+        }
+    }
+
     function wrapService(service) {
         if (!service || service.__etsyManagementGated || typeof service.streamMessage !== 'function') {
             return service;
@@ -59,13 +77,23 @@
                 return raw;
             }
 
-            // Explicit management requests still get semantic classification. Unsolicited
-            // memory offers are intentionally disabled: saving durable facts must be an
-            // Owner-initiated action, not a side effect of an ordinary conversation.
-            return originalStreamMessage({
+            // Explicit management requests still get semantic classification, but technical
+            // classifier streaming stays internal. We emit one normalized result at the end.
+            let captured = '';
+            const result = await originalStreamMessage({
                 ...params,
-                systemInstruction: `${systemInstruction}\n\nIMPORTANT: action=offer is disabled. Return domain=none/action=none unless the Owner explicitly asked to manage persistent memory or saved quick replies.`
+                systemInstruction: `${systemInstruction}\n\nIMPORTANT: action=offer is disabled. Return domain=none/action=none unless the Owner explicitly asked to manage persistent memory or saved quick replies.`,
+                onChunk: (_chunk, fullText) => {
+                    captured = fullText || captured;
+                },
+                onComplete: fullText => {
+                    captured = fullText || captured;
+                }
             });
+            const normalized = normalizeClassifierResult(captured || result || '');
+            params.onChunk?.(normalized, normalized);
+            params.onComplete?.(normalized);
+            return normalized;
         };
         service.__etsyManagementGated = true;
         return service;
@@ -78,6 +106,7 @@
 
     window.EtsyAgentManagementGate = {
         looksLikeExplicitManagement,
-        noneClassification
+        noneClassification,
+        normalizeClassifierResult
     };
 })();
