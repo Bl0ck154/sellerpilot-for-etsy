@@ -1,34 +1,33 @@
-// inject_interceptor.js - Injects page_interceptor.js into page context
-// This runs as a content script and injects the fetch interceptor into the actual page context
-
+// inject_interceptor.js - Injects page_interceptor.js when Etsy enters messages, including SPA navigation.
 (function () {
     'use strict';
 
-    // Only run on /messages/* pages (any messages page)
-    if (!window.location.pathname.startsWith('/messages')) {
-        return;
+    function isMessagesPage() {
+        return window.location.pathname.startsWith('/messages');
     }
 
-    // Prevent double injection
-    if (window.__ETSY_INTERCEPTOR_INJECTED__) {
-        return;
+    function maybeInject() {
+        if (!isMessagesPage() || window.__ETSY_INTERCEPTOR_INJECTED__) return false;
+        window.__ETSY_INTERCEPTOR_INJECTED__ = true;
+
+        const script = document.createElement('script');
+        script.src = chrome.runtime.getURL('content/page_interceptor.js');
+        script.type = 'text/javascript';
+        script.onload = () => script.remove();
+        script.onerror = () => {
+            // Allow a later navigation/retry to attempt injection again.
+            window.__ETSY_INTERCEPTOR_INJECTED__ = false;
+            script.remove();
+            console.error('🔴 Etsy Interceptor: Failed to inject page script');
+        };
+        (document.head || document.documentElement).appendChild(script);
+        return true;
     }
-    window.__ETSY_INTERCEPTOR_INJECTED__ = true;
 
-    // Create and inject script element
-    const script = document.createElement('script');
-    script.src = chrome.runtime.getURL('content/page_interceptor.js');
-    script.type = 'text/javascript';
+    maybeInject();
+    window.addEventListener('etsy-ai-locationchange', maybeInject);
+    window.addEventListener('popstate', maybeInject);
+    window.addEventListener('hashchange', maybeInject);
 
-    script.onload = function () {
-        // Remove script tag after execution to keep DOM clean
-        script.remove();
-    };
-
-    script.onerror = function () {
-        console.error('🔴 Etsy Interceptor: Failed to inject page script');
-    };
-
-    // Inject as early as possible
-    (document.head || document.documentElement).appendChild(script);
+    window.EtsyInterceptorInjector = { maybeInject };
 })();
