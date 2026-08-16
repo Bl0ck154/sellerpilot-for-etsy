@@ -41,12 +41,29 @@ window.EtsyContextInterceptor = (function () {
             ...message,
             attachments: message.attachments || message.images || []
         }));
-        // Sort only when every message has a reliable timestamp. Otherwise preserve Etsy's
-        // source ordering instead of inventing chronology for undated records.
         if (normalized.length > 1 && normalized.every(message => messageTimeMs(message) > 0)) {
             normalized.sort((a, b) => messageTimeMs(a) - messageTimeMs(b));
         }
         return normalized;
+    }
+
+    async function isResponseCurrent(convoId, responseTimestamp) {
+        if (!isLiveConversation(convoId)) return false;
+        const state = await chrome.storage.local.get([
+            STORAGE_KEYS.CHAT_HISTORY,
+            STORAGE_KEYS.CURRENT_LISTING_SCOPE
+        ]);
+        if (!isLiveConversation(convoId)) return false;
+
+        const history = state[STORAGE_KEYS.CHAT_HISTORY];
+        const listingScope = state[STORAGE_KEYS.CURRENT_LISTING_SCOPE];
+        const historyTimestamp = normalizeId(history?.convo_id) === convoId
+            ? Number(history?.timestamp || 0)
+            : 0;
+        const listingTimestamp = normalizeId(listingScope?.convoId) === convoId
+            ? Number(listingScope?.updatedAt || 0)
+            : 0;
+        return Number(responseTimestamp || 0) >= Math.max(historyTimestamp, listingTimestamp);
     }
 
     function setupMessageListener() {
@@ -111,10 +128,15 @@ window.EtsyContextInterceptor = (function () {
             }
         }
 
+        if (!(await isResponseCurrent(convoId, responseTimestamp))) return false;
+
         let listingId = extractListingId(detail);
         const transactionId = receiptHistory[0]?.transactions?.[0]?.transaction_id;
         if (!listingId && transactionId) listingId = await getListingIdFromTransaction(transactionId);
-        if (!isLiveConversation(convoId)) return false;
+
+        // The transaction redirect above can race with a newer detail response for the same
+        // conversation. Re-check monotonic response age before writing or clearing listing state.
+        if (!(await isResponseCurrent(convoId, responseTimestamp))) return false;
 
         if (listingId) {
             await chrome.storage.local.set({
@@ -122,7 +144,9 @@ window.EtsyContextInterceptor = (function () {
                 [STORAGE_KEYS.CURRENT_LISTING_SCOPE]: {
                     convoId,
                     listingId: String(listingId),
-                    updatedAt: Date.now()
+                    // Use the response start time, not write-completion time. This preserves
+                    // monotonic ordering even when an older network request finishes later.
+                    updatedAt: responseTimestamp
                 }
             });
         } else {
