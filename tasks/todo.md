@@ -640,3 +640,19 @@
 - [x] Triggered GitHub Actions workflow `Microsoft Edge Add-ons Release` with `publish=true` for `1.6.22`.
 - [x] Run `31775855265` completed successfully in `1m1s`.
 - [x] Edge package upload, processing, draft publish, and publish processing all passed.
+
+---
+
+# Phase 52 — Chat initialization hotfix and Edge release 1.6.23 (2026-08-16)
+
+## Plan
+- [x] Remove the accidental out-of-scope `customSettings` reference from `setupQuickActionsMenu()` that interrupted chat initialization in `1.6.22`.
+- [x] Add a targeted regression assertion that prevents custom-provider configuration state from leaking into quick-actions setup.
+- [x] Run JavaScript syntax validation, all 9 unit/regression suites, and the release build; verify `dist/chrome/manifest.json` = `1.6.23`.
+- [x] Build an emergency unpacked Edge archive for immediate sideloading while Store distribution catches up.
+- [x] Hotfix commit `b478a0a` pushed to `main`.
+
+## Edge release
+- [x] Triggered GitHub Actions workflow `Microsoft Edge Add-ons Release` with `publish=true` for `1.6.23`.
+- [x] Run `31951663585` completed successfully in `58s`.
+- [x] Edge package upload, processing, draft publish, and publish processing all passed.
