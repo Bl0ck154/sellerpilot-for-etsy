@@ -192,6 +192,15 @@ const instructions = context.window.BaseAIService.INSTRUCTIONS;
     assert.match(chatUiSource, /Use semantic intent, not keyword matching/);
     assert.match(chatUiSource, /analyzeCurrentCustomerImages/);
     assert.doesNotMatch(chatUiSource, /shouldAnalyzeQuickReplyIntent|IMAGE_ANALYSIS_DECISION_SYSTEM_PROMPT|detectOverpromiseRisk/);
+    const quickActionsSetup = chatUiSource.slice(
+        chatUiSource.indexOf('function setupQuickActionsMenu()'),
+        chatUiSource.indexOf('function toggleQuickActionsMenu()')
+    );
+    assert.doesNotMatch(
+        quickActionsSetup,
+        /customSettings/,
+        'quick actions setup must not reference custom-provider settings outside their configuration scope'
+    );
 
     console.log('ai context and prompt tests passed');
 })().catch(error => {

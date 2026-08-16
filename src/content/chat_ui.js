@@ -941,9 +941,6 @@ Prefer unclear when unsure.`;
                 : action.prompt;
             handleChatInteraction(prompt, action.systemAction);
         });
-        if (customSettings.enabled && customSettings.model) {
-            CONFIG.models.push({ id: customSettings.model, name: customSettings.model, provider: 'custom' });
-        }
     }
 
     function toggleQuickActionsMenu() {
