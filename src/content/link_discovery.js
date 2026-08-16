@@ -15,14 +15,15 @@ window.LinkDiscovery = (function () {
     }
 
     function init() {
-        if (!window.location.pathname.startsWith('/messages')) return;
-        if (initialized) return;
-        initialized = true;
-
-        setupTriggers();
-        setupStorageListener();
-        setupNavigationWatcher();
-        scheduleDiscovery(250);
+        if (!initialized) {
+            initialized = true;
+            // Install lightweight global watchers even when the extension initially loads on
+            // another Etsy page. SPA navigation can enter /messages without reloading scripts.
+            setupTriggers();
+            setupStorageListener();
+            setupNavigationWatcher();
+        }
+        if (/^\/messages\/\d+/.test(window.location.pathname)) scheduleDiscovery(250);
     }
 
     function setupTriggers() {
@@ -51,7 +52,12 @@ window.LinkDiscovery = (function () {
             const currentPathname = window.location.pathname;
             if (currentPathname === lastPathname) return;
             lastPathname = currentPathname;
-            if (/^\/messages\/\d+/.test(currentPathname)) scheduleDiscovery(200);
+            if (/^\/messages\/\d+/.test(currentPathname)) {
+                scheduleDiscovery(200);
+            } else if (retryTimer) {
+                clearTimeout(retryTimer);
+                retryTimer = null;
+            }
         };
 
         window.addEventListener('etsy-ai-locationchange', checkForConversationChange);
@@ -60,6 +66,7 @@ window.LinkDiscovery = (function () {
     }
 
     function scheduleDiscovery(delayMs = 1500) {
+        if (!/^\/messages\/\d+/.test(window.location.pathname)) return;
         if (retryTimer) clearTimeout(retryTimer);
         retryTimer = setTimeout(() => {
             retryTimer = null;
@@ -87,8 +94,6 @@ window.LinkDiscovery = (function () {
             : null;
         const scope = result[LISTING_SCOPE_KEY];
 
-        // A global listing id without matching conversation scope is unsafe during SPA
-        // transitions. Wait for the context interceptor/scope guard to bind it.
         if (!listingId ||
             String(scope?.convoId || '') !== liveConversationId ||
             String(scope?.listingId || '') !== listingId) {
@@ -129,8 +134,6 @@ window.LinkDiscovery = (function () {
                 return;
             }
 
-            // Re-read the live scope after network I/O. A slow response from customer A
-            // must never populate customer B's active context after an SPA navigation.
             const currentScope = await readScopedListing();
             if (!currentScope ||
                 currentScope.liveConversationId !== scope.liveConversationId ||
