@@ -1,0 +1,64 @@
+{
+  "schemaVersion": 1,
+  "configVersion": "2026-08-17.1",
+  "remoteTtlMs": 21600000,
+  "selectors": {
+    "composer": [
+      { "id": "legacy-textarea", "selector": "textarea.wt-textarea", "confidence": 1.0 },
+      { "id": "reply-placeholder", "selector": "textarea[placeholder*=\"reply\" i]", "confidence": 0.96 },
+      { "id": "reply-aria", "selector": "textarea[aria-label*=\"reply\" i]", "confidence": 0.96 },
+      { "id": "messages-form-textarea", "selector": ".detail-view form textarea, main form textarea", "confidence": 0.78 },
+      { "id": "contenteditable-reply", "selector": "[contenteditable=\"true\"][role=\"textbox\"]", "confidence": 0.6 }
+    ],
+    "composeContainer": [
+      { "id": "legacy-inline-compose", "selector": ".inline-compose-container", "confidence": 1.0 },
+      { "id": "composer-form", "selector": "form:has(textarea[placeholder*=\"reply\" i])", "confidence": 0.85 },
+      { "id": "composer-form-aria", "selector": "form:has(textarea[aria-label*=\"reply\" i])", "confidence": 0.85 }
+    ],
+    "messageList": [
+      { "id": "legacy-message-list", "selector": ".msg-list-container", "confidence": 1.0 },
+      { "id": "legacy-scrolling-list", "selector": ".scrolling-message-list", "confidence": 0.9 },
+      { "id": "message-log", "selector": "[role=\"log\"]", "confidence": 0.82 },
+      { "id": "message-region", "selector": "[aria-label*=\"message\" i][role=\"region\"]", "confidence": 0.7 }
+    ],
+    "scrollingMessageList": [
+      { "id": "legacy-scrolling-list", "selector": ".scrolling-message-list", "confidence": 1.0 },
+      { "id": "message-log", "selector": "[role=\"log\"]", "confidence": 0.82 }
+    ],
+    "detailView": [
+      { "id": "legacy-detail-view", "selector": ".detail-view", "confidence": 1.0 },
+      { "id": "composer-ancestor-main", "selector": "main", "confidence": 0.55 }
+    ],
+    "gridRoot": [
+      { "id": "legacy-grid-root", "selector": ".wt-grid.wt-overflow-hidden.wt-bt-xs.wt-width-full", "confidence": 1.0 },
+      { "id": "messages-main-grid", "selector": "main .wt-grid.wt-width-full", "confidence": 0.78 }
+    ],
+    "leftColumn": [
+      { "id": "legacy-left-column", "selector": ".wt-grid__item-lg-2", "confidence": 1.0 },
+      { "id": "inbox-navigation", "selector": "nav[aria-label*=\"message\" i], aside nav", "confidence": 0.55 }
+    ],
+    "rightColumn": [
+      { "id": "legacy-right-column", "selector": ".wt-grid__item-lg-3", "confidence": 1.0 },
+      { "id": "order-details-aside", "selector": "aside[aria-label*=\"order\" i], aside[aria-label*=\"detail\" i]", "confidence": 0.7 }
+    ],
+    "messageBubble": [
+      { "id": "message-id", "selector": "[data-message-id]", "confidence": 0.92 },
+      { "id": "conversation-message-id", "selector": "[data-conversation-message-id]", "confidence": 0.92 },
+      { "id": "message-list-items", "selector": "[role=\"log\"] > *", "confidence": 0.55 }
+    ]
+  },
+  "knownLayouts": [
+    {
+      "id": "etsy-messages-three-column",
+      "pageKind": "conversation",
+      "required": ["composer", "messageList", "detailView"],
+      "optional": ["gridRoot", "leftColumn", "rightColumn"]
+    },
+    {
+      "id": "etsy-messages-inbox",
+      "pageKind": "inbox",
+      "required": ["gridRoot"],
+      "optional": ["leftColumn"]
+    }
+  ]
+}
