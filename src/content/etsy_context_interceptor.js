@@ -1,403 +1,56 @@
-// etsy_context_interceptor.js - Live Etsy conversation ingestion with strict SPA scope guards.
-window.EtsyContextInterceptor = (function () {
-    const STORAGE_KEYS = {
-        SHOP_ID: 'ETSY_GLOBAL_SHOP_ID',
-        USER_ID: 'ETSY_GLOBAL_USER_ID',
-        CHAT_HISTORY: 'ETSY_CHAT_HISTORY',
-        CURRENT_LISTING_ID: 'ETSY_CURRENT_LISTING_ID',
-        CURRENT_LISTING_SCOPE: 'ETSY_CURRENT_LISTING_SCOPE'
-    };
+// etsy_context_interceptor.js - Live Etsy conversation ingestion with strict SPA/multi-tab scope guards.
+window.EtsyContextInterceptor=(function(){
+    const STORAGE_KEYS={SHOP_ID:'ETSY_GLOBAL_SHOP_ID',USER_ID:'ETSY_GLOBAL_USER_ID',CHAT_HISTORY:'ETSY_CHAT_HISTORY',CURRENT_LISTING_ID:'ETSY_CURRENT_LISTING_ID',CURRENT_LISTING_SCOPE:'ETSY_CURRENT_LISTING_SCOPE'};
+    const store=window.ScopedConversationStore||null,CONTENT_SESSION_ID=`${Date.now().toString(36)}-${Math.random().toString(36).slice(2,10)}`;
+    let initialized=false,lastConvoId=null,messageListenerInstalled=false,navigationListenersInstalled=false,navigationGeneration=0,navigationTimer=null,cleanupQueue=Promise.resolve();
+    const liveConvo=()=>window.location.pathname.match(/^\/messages\/(\d+)/)?.[1]||null;
+    const id=v=>v===null||v===undefined?'':String(v).trim();
+    const seq=v=>{const n=Number(v);return Number.isFinite(n)&&n>=0?n:0;};
+    const liveMatches=c=>!!liveConvo()&&liveConvo()===id(c);
+    function timeMs(m){const raw=m?.create_date??m?.created_at??m?.timestamp??null,n=Number(raw);if(raw!==null&&raw!==''&&Number.isFinite(n)&&n>0)return n<10_000_000_000?n*1000:n;const p=Date.parse(String(raw||''));return Number.isFinite(p)?p:0;}
+    function attachmentId(a){return id(a?.convo_message_attachment_id||a?.attachment_id||a?.image_id||a?.url||a?.fullsize_url||a?.image_url||a?.download_url||a?.image_data?.url||a?.thumb_url||a?.thumbnail_url);}
+    function mergeAttachments(m){const out=[],seen=new Set();for(const a of[...(m?.attachments||[]),...(m?.images||[])]){if(!a)continue;const key=attachmentId(a)||`index:${out.length}`;if(seen.has(key))continue;seen.add(key);out.push(a);}return out;}
+    function normalizeMessages(messages){const out=(messages||[]).map(m=>({...m,attachments:mergeAttachments(m)}));if(out.length>1&&out.every(m=>timeMs(m)>0))out.sort((a,b)=>timeMs(a)-timeMs(b));return out;}
+    function storedSequence(record,convoId){if(!record||id(record.convo_id||record.convoId)!==convoId||record.sourceSessionId!==CONTENT_SESSION_ID)return 0;return seq(record.sourceSequence);}
+    async function readHistory(convoId){if(store)return store.getHistory(convoId);const s=await chrome.storage.local.get([STORAGE_KEYS.CHAT_HISTORY]),h=s[STORAGE_KEYS.CHAT_HISTORY];return id(h?.convo_id||h?.conversation_id)===id(convoId)?h:null;}
+    async function writeHistory(history){if(store)return store.setHistory(history);await chrome.storage.local.set({[STORAGE_KEYS.CHAT_HISTORY]:history});return true;}
+    async function readListing(convoId){if(store)return store.getListing(convoId);const s=await chrome.storage.local.get([STORAGE_KEYS.CURRENT_LISTING_ID,STORAGE_KEYS.CURRENT_LISTING_SCOPE]),listing=id(s[STORAGE_KEYS.CURRENT_LISTING_ID]),scope=s[STORAGE_KEYS.CURRENT_LISTING_SCOPE];return listing&&id(scope?.convoId)===id(convoId)&&id(scope?.listingId)===listing?{...scope,listingId:listing}:null;}
+    async function writeListing(convoId,listingId,extra){if(store)return store.setListing(convoId,listingId,extra);const scope={...extra,convoId:String(convoId),listingId:String(listingId)};await chrome.storage.local.set({[STORAGE_KEYS.CURRENT_LISTING_ID]:String(listingId),[STORAGE_KEYS.CURRENT_LISTING_SCOPE]:scope});return true;}
+    async function clearListing(convoId){if(store)return store.clearListing(convoId);await chrome.storage.local.remove([STORAGE_KEYS.CURRENT_LISTING_ID,STORAGE_KEYS.CURRENT_LISTING_SCOPE]);return true;}
+    async function responseCurrent(convoId,sourceSequence){if(!liveMatches(convoId))return false;const[history,listing]=await Promise.all([readHistory(convoId),readListing(convoId)]);if(!liveMatches(convoId))return false;return seq(sourceSequence)>=Math.max(storedSequence(history,convoId),storedSequence(listing,convoId));}
 
-    // A full page reload creates a new content-script session. Request sequence numbers only
-    // have meaning inside one such session, so old persisted sequence values can never block
-    // fresh data after a reload.
-    const CONTENT_SESSION_ID = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-
-    let initialized = false;
-    let lastConvoId = null;
-    let messageListenerInstalled = false;
-    let navigationListenersInstalled = false;
-
-    function getConvoIdFromUrl() {
-        return window.location.pathname.match(/^\/messages\/(\d+)/)?.[1] || null;
+    function setupMessageListener(){if(messageListenerInstalled)return;messageListenerInstalled=true;window.addEventListener('message',event=>{if(event.source!==window||event.data?.source!=='etsy-page-interceptor'||event.data?.type!=='ETSY_DETAIL_VIEW_DATA')return;handleDetail(event.data.data,{requestSequence:event.data.requestSequence,requestStartedAt:event.data.requestStartedAt}).catch(e=>console.error('EtsyContextInterceptor: detail processing failed',e));});}
+    async function handleDetail(data,ordering={}){const detail=data?.detail;if(!detail)return false;return processDetail(detail,data?.shop_id||detail?.shop_id||null,ordering);}
+    async function processDetail(detail,shopId,ordering={}){
+        const convoId=id(detail?.conversation_id);if(!convoId||!liveMatches(convoId)||!chrome.runtime?.id)return false;lastConvoId=convoId;const timestamp=Date.now(),sourceSequence=seq(ordering.requestSequence),receiptHistory=Array.isArray(detail.receipt_history)?detail.receipt_history:[],receiptId=receiptHistory[0]?.receipt_id;let messages=Array.isArray(detail.messages)?detail.messages:[];
+        if(shopId)await updateGlobal(STORAGE_KEYS.SHOP_ID,String(shopId));
+        if(receiptId&&shopId){const mission=await fetchMission(shopId,receiptId);if(!(await responseCurrent(convoId,sourceSequence)))return false;if(mission.length)messages=mission;}
+        if(messages.length&&await responseCurrent(convoId,sourceSequence)){await writeHistory({convo_id:convoId,customer_display_name:String(detail.other_user?.display_name||'').trim(),customer_user_id:detail.other_user?.user_id?String(detail.other_user.user_id):null,messages:normalizeMessages(messages),timestamp,sourceSessionId:CONTENT_SESSION_ID,sourceSequence});window.ShopIntelligenceManager?.maybeBootstrap?.('conversation_loaded');}
+        if(!(await responseCurrent(convoId,sourceSequence)))return false;
+        let listingId=extractListingId(detail);const transactionId=receiptHistory[0]?.transactions?.[0]?.transaction_id;if(!listingId&&transactionId)listingId=await listingFromTransaction(transactionId);if(!(await responseCurrent(convoId,sourceSequence)))return false;
+        if(listingId)await writeListing(convoId,String(listingId),{updatedAt:timestamp,sourceSessionId:CONTENT_SESSION_ID,sourceSequence});else await clearListing(convoId);
+        if(!(await responseCurrent(convoId,sourceSequence)))return false;window.ImageIntelligenceManager?.scheduleBackgroundAnalysis?.(0);return true;
     }
 
-    function normalizeId(value) {
-        return value === null || value === undefined ? '' : String(value).trim();
-    }
+    function enqueueCleanup(){const task=cleanupQueue.catch(()=>undefined).then(()=>clearStaleStorage());cleanupQueue=task.then(()=>undefined,()=>undefined);return task;}
+    async function settleNavigation(generation){await enqueueCleanup();if(generation!==navigationGeneration)return;if(liveConvo())parseInitial().catch(e=>console.error('EtsyContextInterceptor: initial hydration failed',e));}
+    function scheduleNavigation(delay=0){const generation=++navigationGeneration;if(navigationTimer)clearTimeout(navigationTimer);navigationTimer=setTimeout(()=>{navigationTimer=null;settleNavigation(generation).catch(e=>console.error('EtsyContextInterceptor: navigation sync failed',e));},Math.max(0,delay));}
+    function setupNavigationListeners(){if(navigationListenersInstalled)return;navigationListenersInstalled=true;const fn=()=>scheduleNavigation(0);window.addEventListener('etsy-ai-locationchange',fn);window.addEventListener('popstate',fn);window.addEventListener('hashchange',fn);}
+    function init(){if(!initialized){initialized=true;setupMessageListener();setupNavigationListeners();}scheduleNavigation(0);}
+    async function fetchMission(shopId,receiptId){try{const response=await fetch(`https://www.etsy.com/api/v3/ajax/shop/${encodeURIComponent(shopId)}/mission-control/orders/convos/${encodeURIComponent(receiptId)}`,{credentials:'include',headers:{Accept:'application/json','X-Requested-With':'XMLHttpRequest'}});if(!response.ok)return[];const data=await response.json();return Array.isArray(data.messages)?data.messages:[];}catch(e){console.warn('EtsyContextInterceptor: mission-control failed',e);return[];}}
 
-    function normalizeSequence(value) {
-        const numeric = Number(value);
-        return Number.isFinite(numeric) && numeric >= 0 ? numeric : 0;
-    }
-
-    function isLiveConversation(convoId) {
-        const live = getConvoIdFromUrl();
-        return !!live && live === normalizeId(convoId);
-    }
-
-    function messageTimeMs(message) {
-        const raw = message?.create_date ?? message?.created_at ?? message?.timestamp ?? null;
-        const numeric = Number(raw);
-        if (raw !== null && raw !== '' && Number.isFinite(numeric) && numeric > 0) {
-            return numeric < 10_000_000_000 ? numeric * 1000 : numeric;
-        }
-        const parsed = Date.parse(String(raw || ''));
-        return Number.isFinite(parsed) ? parsed : 0;
-    }
-
-    function normalizeMessages(messages) {
-        const normalized = (messages || []).map(message => ({
-            ...message,
-            attachments: message.attachments || message.images || []
-        }));
-        if (normalized.length > 1 && normalized.every(message => messageTimeMs(message) > 0)) {
-            normalized.sort((a, b) => messageTimeMs(a) - messageTimeMs(b));
-        }
-        return normalized;
-    }
-
-    function storedSourceSequence(record, convoId) {
-        if (!record || normalizeId(record.convo_id || record.convoId) !== convoId) return 0;
-        if (record.sourceSessionId !== CONTENT_SESSION_ID) return 0;
-        return normalizeSequence(record.sourceSequence);
-    }
-
-    async function isResponseCurrent(convoId, sourceSequence) {
-        if (!isLiveConversation(convoId)) return false;
-        const state = await chrome.storage.local.get([
-            STORAGE_KEYS.CHAT_HISTORY,
-            STORAGE_KEYS.CURRENT_LISTING_SCOPE
-        ]);
-        if (!isLiveConversation(convoId)) return false;
-
-        const newestStoredSequence = Math.max(
-            storedSourceSequence(state[STORAGE_KEYS.CHAT_HISTORY], convoId),
-            storedSourceSequence(state[STORAGE_KEYS.CURRENT_LISTING_SCOPE], convoId)
-        );
-        return normalizeSequence(sourceSequence) >= newestStoredSequence;
-    }
-
-    function setupMessageListener() {
-        if (messageListenerInstalled) return;
-        messageListenerInstalled = true;
-        window.addEventListener('message', event => {
-            if (event.source !== window || event.data?.source !== 'etsy-page-interceptor') return;
-            if (event.data?.type !== 'ETSY_DETAIL_VIEW_DATA') return;
-
-            handleDetailViewData(event.data.data, {
-                requestSequence: event.data.requestSequence,
-                requestStartedAt: event.data.requestStartedAt
-            }).catch(error => {
-                console.error('🔴 EtsyContextInterceptor: Failed to process detail-view-data:', error);
-            });
-        });
-    }
-
-    async function handleDetailViewData(data, ordering = {}) {
-        const detail = data?.detail;
-        if (!detail) return;
-        const shopId = data?.shop_id || detail?.shop_id || null;
-        await processDetailData(detail, shopId, ordering);
-    }
-
-    async function processDetailData(detail, shopId, ordering = {}) {
-        const convoId = normalizeId(detail?.conversation_id);
-        if (!convoId || !isLiveConversation(convoId) || !chrome.runtime?.id) return false;
-
-        lastConvoId = convoId;
-        const responseTimestamp = Date.now();
-        const sourceSequence = normalizeSequence(ordering.requestSequence);
-        const receiptHistory = Array.isArray(detail.receipt_history) ? detail.receipt_history : [];
-        const receiptId = receiptHistory[0]?.receipt_id;
-        let finalMessages = Array.isArray(detail.messages) ? detail.messages : [];
-
-        if (shopId) await updateGlobalParam(STORAGE_KEYS.SHOP_ID, String(shopId));
-
-        if (receiptId && shopId) {
-            const missionControlMessages = await fetchMissionControlHistory(shopId, receiptId);
-            if (!(await isResponseCurrent(convoId, sourceSequence))) return false;
-            if (missionControlMessages.length > 0) finalMessages = missionControlMessages;
-        }
-
-        if (finalMessages.length > 0 && await isResponseCurrent(convoId, sourceSequence)) {
-            await chrome.storage.local.set({
-                [STORAGE_KEYS.CHAT_HISTORY]: {
-                    convo_id: convoId,
-                    customer_display_name: String(detail.other_user?.display_name || '').trim(),
-                    customer_user_id: detail.other_user?.user_id
-                        ? String(detail.other_user.user_id)
-                        : null,
-                    messages: normalizeMessages(finalMessages),
-                    timestamp: responseTimestamp,
-                    sourceSessionId: CONTENT_SESSION_ID,
-                    sourceSequence
-                }
-            });
-            window.ShopIntelligenceManager?.maybeBootstrap?.('conversation_loaded');
-        }
-
-        if (!(await isResponseCurrent(convoId, sourceSequence))) return false;
-
-        let listingId = extractListingId(detail);
-        const transactionId = receiptHistory[0]?.transactions?.[0]?.transaction_id;
-        if (!listingId && transactionId) listingId = await getListingIdFromTransaction(transactionId);
-
-        if (!(await isResponseCurrent(convoId, sourceSequence))) return false;
-
-        if (listingId) {
-            await chrome.storage.local.set({
-                [STORAGE_KEYS.CURRENT_LISTING_ID]: String(listingId),
-                [STORAGE_KEYS.CURRENT_LISTING_SCOPE]: {
-                    convoId,
-                    listingId: String(listingId),
-                    updatedAt: responseTimestamp,
-                    sourceSessionId: CONTENT_SESSION_ID,
-                    sourceSequence
-                }
-            });
-        } else {
-            await chrome.storage.local.remove([
-                STORAGE_KEYS.CURRENT_LISTING_ID,
-                STORAGE_KEYS.CURRENT_LISTING_SCOPE
-            ]);
-        }
-
-        if (!(await isResponseCurrent(convoId, sourceSequence))) return false;
-
-        // Analyze every newly received customer image after listing context is ready.
-        // The image manager itself is additionally guarded against cross-conversation scope.
-        if (window.ImageIntelligenceManager?.analyzeCurrentCustomerImages) {
-            window.ImageIntelligenceManager.analyzeCurrentCustomerImages().catch(error => {
-                console.warn('ImageIntelligence: background analysis failed', error);
-            });
-        }
-        return true;
-    }
-
-    function setupNavigationListeners() {
-        if (navigationListenersInstalled) return;
-        navigationListenersInstalled = true;
-        const onNavigation = () => {
-            clearStaleStorage();
-            if (window.location.pathname.startsWith('/messages')) {
-                setTimeout(parseInitialContext, 0);
-            }
-        };
-        window.addEventListener('etsy-ai-locationchange', onNavigation);
-        window.addEventListener('popstate', onNavigation);
-        window.addEventListener('hashchange', onNavigation);
-    }
-
-    function init() {
-        // Install listeners globally even when the extension initially loads on a non-message
-        // Etsy page. This lets an in-app SPA transition into /messages become fully hydrated
-        // without requiring a page reload.
-        if (!initialized) {
-            initialized = true;
-            setupMessageListener();
-            setupNavigationListeners();
-        }
-
-        clearStaleStorage();
-        if (window.location.pathname.startsWith('/messages')) parseInitialContext();
-    }
-
-    async function fetchMissionControlHistory(shopId, receiptId) {
-        try {
-            const url = `https://www.etsy.com/api/v3/ajax/shop/${encodeURIComponent(shopId)}/mission-control/orders/convos/${encodeURIComponent(receiptId)}`;
-            const response = await fetch(url, {
-                credentials: 'include',
-                headers: {
-                    'Accept': 'application/json',
-                    'X-Requested-With': 'XMLHttpRequest'
-                }
-            });
-            if (!response.ok) {
-                console.warn(`⚠️ Mission-control API failed: ${response.status}`);
-                return [];
-            }
-            const data = await response.json();
-            return Array.isArray(data.messages) ? data.messages : [];
-        } catch (error) {
-            console.error('🔴 Mission-control API error:', error);
-            return [];
-        }
-    }
-
-    async function clearStaleStorage() {
-        if (!chrome.runtime?.id) return;
-        const currentConvoId = getConvoIdFromUrl();
-
-        try {
-            const result = await chrome.storage.local.get([
-                STORAGE_KEYS.CHAT_HISTORY,
-                STORAGE_KEYS.CURRENT_LISTING_SCOPE
-            ]);
-            const chatHistory = result[STORAGE_KEYS.CHAT_HISTORY];
-            const listingScope = result[STORAGE_KEYS.CURRENT_LISTING_SCOPE];
-            const remove = [];
-
-            if (!currentConvoId) {
-                if (chatHistory) remove.push(STORAGE_KEYS.CHAT_HISTORY);
-                if (listingScope) remove.push(STORAGE_KEYS.CURRENT_LISTING_ID, STORAGE_KEYS.CURRENT_LISTING_SCOPE);
-            } else {
-                if (chatHistory && normalizeId(chatHistory.convo_id) !== currentConvoId) {
-                    remove.push(STORAGE_KEYS.CHAT_HISTORY);
-                }
-                if (listingScope && normalizeId(listingScope.convoId) !== currentConvoId) {
-                    remove.push(STORAGE_KEYS.CURRENT_LISTING_ID, STORAGE_KEYS.CURRENT_LISTING_SCOPE);
-                }
-            }
-
-            if (remove.length) await chrome.storage.local.remove([...new Set(remove)]);
-        } catch (error) {
-            console.error('🔴 EtsyContextInterceptor: Failed to clear stale storage:', error);
-        }
-    }
-
-    async function parseInitialContext() {
-        if (!getConvoIdFromUrl()) return;
-        try {
-            const etsyContext = extractEtsyContext();
-            const detail = etsyContext?.data?.initial_data?.detail;
-            if (!detail || !isLiveConversation(detail.conversation_id)) return;
-
-            const shopId = etsyContext?.data?.shop_id || detail?.shop_id || null;
-            await processDetailData(detail, shopId, { requestSequence: 0 });
-        } catch (error) {
-            console.error('🔴 EtsyContextInterceptor: Failed to parse initial context:', error);
-        }
-    }
-
-    function extractEtsyContext() {
-        if (window.Etsy?.Context) return window.Etsy.Context;
-
-        const scripts = document.querySelectorAll('script[type="text/javascript"], script:not([src])');
-        for (const script of scripts) {
-            const content = script.textContent || '';
-            if (!content.includes('Etsy.Context')) continue;
-            const match = content.match(/Etsy\.Context\s*=\s*(\{[\s\S]*?\});?\s*(?:<\/script>|$)/);
-            if (!match) continue;
-            try {
-                return JSON.parse(match[1].replace(/;?\s*$/, ''));
-            } catch (_) {
-                // Keep scanning; Etsy can include unrelated script text before the real object.
-            }
-        }
-        return null;
-    }
-
-    function normalizeListingId(value) {
-        const match = normalizeId(value).match(/\d{5,}/);
-        return match ? match[0] : null;
-    }
-
-    function extractListingId(detail) {
-        if (!detail) return null;
-
-        const directCandidates = [
-            detail.listing_id,
-            detail.listingId,
-            detail.listing?.listing_id,
-            detail.listing?.listingId,
-            detail.transaction?.listing_id,
-            detail.transaction?.listingId,
-            detail.receipt_history?.[0]?.transactions?.[0]?.listing_id,
-            detail.receipt_history?.[0]?.transactions?.[0]?.listingId,
-            detail.receipt_history?.[0]?.transactions?.[0]?.listing?.listing_id,
-            detail.receipt_history?.[0]?.transactions?.[0]?.listing?.listingId
-        ];
-        for (const candidate of directCandidates) {
-            const id = normalizeListingId(candidate);
-            if (id) return id;
-        }
-
-        const seen = new Set();
-        const stack = [detail.receipt_history, detail.messages, detail.order, detail.receipt, detail.transaction];
-        while (stack.length > 0) {
-            const item = stack.pop();
-            if (!item || typeof item !== 'object' || seen.has(item)) continue;
-            seen.add(item);
-
-            if (Array.isArray(item)) {
-                for (const child of item) stack.push(child);
-                continue;
-            }
-
-            for (const [key, value] of Object.entries(item)) {
-                const lowerKey = key.toLowerCase();
-                if ((lowerKey === 'listing_id' || lowerKey === 'listingid') && value) {
-                    const id = normalizeListingId(value);
-                    if (id) return id;
-                }
-                if (typeof value === 'string' && /listing/.test(lowerKey + value)) {
-                    const match = value.match(/\/listing\/(\d{5,})/);
-                    if (match) return match[1];
-                }
-                if (value && typeof value === 'object') stack.push(value);
-            }
-        }
-        return null;
-    }
-
-    async function getListingIdFromTransaction(transactionId) {
-        try {
-            const response = await fetch(`https://www.etsy.com/transaction/${encodeURIComponent(transactionId)}`, {
-                credentials: 'include',
-                redirect: 'follow'
-            });
-            return response.url?.match(/\/listing\/(\d+)/)?.[1] || null;
-        } catch (error) {
-            console.error('🔴 EtsyContextInterceptor: Transaction redirect failed:', error);
-            return null;
-        }
-    }
-
-    async function updateGlobalParam(key, value) {
-        if (!chrome.runtime?.id) return;
-        try {
-            const result = await chrome.storage.local.get([key]);
-            if (result[key] !== value) await chrome.storage.local.set({ [key]: value });
-        } catch (error) {
-            console.error(`🔴 EtsyContextInterceptor: Failed to update ${key}:`, error);
-        }
-    }
-
-    return {
-        init,
-        STORAGE_KEYS,
-        getSessionId: () => CONTENT_SESSION_ID,
-        async getShopId() {
-            const result = await chrome.storage.local.get([STORAGE_KEYS.SHOP_ID]);
-            return result[STORAGE_KEYS.SHOP_ID] || null;
-        },
-        async getUserId() {
-            const result = await chrome.storage.local.get([STORAGE_KEYS.USER_ID]);
-            return result[STORAGE_KEYS.USER_ID] || null;
-        },
-        async getCurrentListingId() {
-            const result = await chrome.storage.local.get([
-                STORAGE_KEYS.CURRENT_LISTING_ID,
-                STORAGE_KEYS.CURRENT_LISTING_SCOPE
-            ]);
-            const listingId = result[STORAGE_KEYS.CURRENT_LISTING_ID];
-            const scope = result[STORAGE_KEYS.CURRENT_LISTING_SCOPE];
-            const live = getConvoIdFromUrl();
-            if (live && normalizeId(scope?.convoId) !== live) return null;
-            return listingId || null;
-        },
-        async getChatHistory() {
-            const result = await chrome.storage.local.get([STORAGE_KEYS.CHAT_HISTORY]);
-            const history = result[STORAGE_KEYS.CHAT_HISTORY] || null;
-            return history && isLiveConversation(history.convo_id) ? history : null;
-        },
-        getState: () => ({ initialized, lastConvoId, sessionId: CONTENT_SESSION_ID })
-    };
+    async function clearStaleStorage(){
+        // Per-conversation keys are the source of truth. Never let one tab delete another
+        // tab's legacy compatibility mirror merely because their live convo IDs differ.
+        if(store)return true;
+        if(!chrome.runtime?.id)return false;const current=liveConvo();try{const first=await chrome.storage.local.get([STORAGE_KEYS.CHAT_HISTORY,STORAGE_KEYS.CURRENT_LISTING_ID,STORAGE_KEYS.CURRENT_LISTING_SCOPE]),remove=[];const h=first[STORAGE_KEYS.CHAT_HISTORY],listing=first[STORAGE_KEYS.CURRENT_LISTING_ID],scope=first[STORAGE_KEYS.CURRENT_LISTING_SCOPE];if(!current){if(h)remove.push(STORAGE_KEYS.CHAT_HISTORY);if(listing||scope)remove.push(STORAGE_KEYS.CURRENT_LISTING_ID,STORAGE_KEYS.CURRENT_LISTING_SCOPE);}else{if(h&&id(h.convo_id)!==current)remove.push(STORAGE_KEYS.CHAT_HISTORY);const match=scope&&id(scope.convoId)===current;if((listing&&!match)||(scope&&!match))remove.push(STORAGE_KEYS.CURRENT_LISTING_ID,STORAGE_KEYS.CURRENT_LISTING_SCOPE);}if(!remove.length||liveConvo()!==current)return true;const latest=await chrome.storage.local.get([STORAGE_KEYS.CHAT_HISTORY,STORAGE_KEYS.CURRENT_LISTING_ID,STORAGE_KEYS.CURRENT_LISTING_SCOPE]);if(liveConvo()!==current)return false;const safe=[];if(remove.includes(STORAGE_KEYS.CHAT_HISTORY)){const x=latest[STORAGE_KEYS.CHAT_HISTORY];if(!current?!!x:!!x&&id(x.convo_id)!==current)safe.push(STORAGE_KEYS.CHAT_HISTORY);}if(remove.includes(STORAGE_KEYS.CURRENT_LISTING_ID)||remove.includes(STORAGE_KEYS.CURRENT_LISTING_SCOPE)){const x=latest[STORAGE_KEYS.CURRENT_LISTING_ID],s=latest[STORAGE_KEYS.CURRENT_LISTING_SCOPE],match=s&&id(s.convoId)===current;if(!current?!!(x||s):!!((x&&!match)||(s&&!match)))safe.push(STORAGE_KEYS.CURRENT_LISTING_ID,STORAGE_KEYS.CURRENT_LISTING_SCOPE);}if(safe.length)await chrome.storage.local.remove([...new Set(safe)]);return true;}catch(e){console.warn('EtsyContextInterceptor: stale cleanup failed',e);return false;}}
+    async function parseInitial(){if(!liveConvo())return false;try{const ctx=extractContext(),detail=ctx?.data?.initial_data?.detail;if(!detail||!liveMatches(detail.conversation_id))return false;return processDetail(detail,ctx?.data?.shop_id||detail?.shop_id||null,{requestSequence:0});}catch(e){console.warn('EtsyContextInterceptor: initial parse failed',e);return false;}}
+    function balanced(text,start){let depth=0,quote='',escaped=false;for(let i=start;i<text.length;i++){const c=text[i];if(quote){if(escaped)escaped=false;else if(c==='\\')escaped=true;else if(c===quote)quote='';continue;}if(c==='"'||c==="'"){quote=c;continue;}if(c==='{')depth++;else if(c==='}'&&--depth===0)return text.slice(start,i+1);}return'';}
+    function extractContext(){if(window.Etsy?.Context)return window.Etsy.Context;for(const script of document.querySelectorAll('script[type="text/javascript"], script:not([src])')){const text=script.textContent||'',marker=text.indexOf('Etsy.Context');if(marker<0)continue;const eq=text.indexOf('=',marker),start=eq>=0?text.indexOf('{',eq):-1;if(start<0)continue;const json=balanced(text,start);if(!json)continue;try{return JSON.parse(json);}catch(_){}}return null;}
+    function normalizeListingId(v){const m=id(v).match(/\d{5,}/);return m?m[0]:null;}
+    function extractListingId(detail){if(!detail)return null;for(const v of[detail.listing_id,detail.listingId,detail.listing?.listing_id,detail.listing?.listingId,detail.transaction?.listing_id,detail.transaction?.listingId,detail.receipt_history?.[0]?.transactions?.[0]?.listing_id,detail.receipt_history?.[0]?.transactions?.[0]?.listingId]){const x=normalizeListingId(v);if(x)return x;}const seen=new Set(),stack=[detail.receipt_history,detail.messages,detail.order,detail.receipt,detail.transaction];while(stack.length){const item=stack.pop();if(!item||typeof item!=='object'||seen.has(item))continue;seen.add(item);if(Array.isArray(item)){stack.push(...item);continue;}for(const[k,v]of Object.entries(item)){const lk=k.toLowerCase();if((lk==='listing_id'||lk==='listingid')&&v){const x=normalizeListingId(v);if(x)return x;}if(typeof v==='string'&&/listing/.test(lk+v)){const m=v.match(/\/listing\/(\d{5,})/);if(m)return m[1];}if(v&&typeof v==='object')stack.push(v);}}return null;}
+    async function listingFromTransaction(transactionId){try{const response=await fetch(`https://www.etsy.com/transaction/${encodeURIComponent(transactionId)}`,{credentials:'include',redirect:'follow'});return response.url?.match(/\/listing\/(\d+)/)?.[1]||null;}catch(_){return null;}}
+    async function updateGlobal(key,value){if(!chrome.runtime?.id)return;try{const s=await chrome.storage.local.get([key]);if(s[key]!==value)await chrome.storage.local.set({[key]:value});}catch(_){}}
+    return{init,STORAGE_KEYS,getSessionId:()=>CONTENT_SESSION_ID,async getShopId(){const s=await chrome.storage.local.get([STORAGE_KEYS.SHOP_ID]);return s[STORAGE_KEYS.SHOP_ID]||null;},async getUserId(){const s=await chrome.storage.local.get([STORAGE_KEYS.USER_ID]);return s[STORAGE_KEYS.USER_ID]||null;},async getCurrentListingId(){const x=store?await store.getListing(liveConvo()):await readListing(liveConvo());return x?.listingId||null;},async getChatHistory(){const h=await readHistory(liveConvo());return h&&liveMatches(h.convo_id)?h:null;},getState:()=>({initialized,lastConvoId,sessionId:CONTENT_SESSION_ID,navigationGeneration,multiTabScoped:!!store})};
 })();
-
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => window.EtsyContextInterceptor.init());
-} else {
-    window.EtsyContextInterceptor.init();
-}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>window.EtsyContextInterceptor.init());else window.EtsyContextInterceptor.init();
