@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security report
+    url: https://github.com/Bl0ck154/ChromeExtensionEtsyAI/security/policy
+    about: Please read the security policy before reporting vulnerabilities or credential exposure.
