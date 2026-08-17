@@ -8,8 +8,8 @@ const manifest = JSON.parse(read('src/manifest.json'));
 const scripts = manifest.content_scripts?.[0]?.js || [];
 const index = name => scripts.indexOf(name);
 
-assert.equal(manifest.version, '1.6.26');
-assert.match(read('build.bat'), /set VERSION=1\.6\.26/);
+assert.equal(manifest.version, '1.6.27');
+assert.match(read('build.bat'), /set VERSION=1\.6\.27/);
 assert.ok(manifest.permissions.includes('unlimitedStorage'));
 
 for (const required of [

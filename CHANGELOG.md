@@ -13,7 +13,23 @@ Store publication can lag behind the repository, so a version listed here does n
 - Added structured GitHub bug-report and feature-request forms.
 - Added a pull-request template with privacy, security, and release-safety checks.
 
-## 1.6.26 — current source
+## 1.6.27 — current source
+
+### Reliability and compatibility
+
+- Consolidated the final 1.6.26 agent-hardening audit into the canonical `main` branch.
+- Added per-conversation scoped storage for safer multi-tab Etsy Messages usage.
+- Added scoped context bridging, AI-call budget controls, image-request gating, and stronger stale-operation protection.
+- Improved image-intelligence batching, persistence, attachment normalization, and conversation isolation.
+- Added a resilient Etsy UI compatibility layer with selector fallbacks, layout diagnostics, and safe degraded behavior when Etsy changes its Messages UI.
+- Preserved both compatibility-layer and agent-hardening manifest wiring in the unified release build.
+
+### Release maintenance
+
+- Removed stale hardening, compatibility, release, and preparation branches after consolidation.
+- Bumped the browser package version to 1.6.27 for the post-consolidation Edge release.
+
+## 1.6.26
 
 ### Reliability and context safety
 
