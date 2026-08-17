@@ -109,6 +109,10 @@ Please read [SECURITY.md](./SECURITY.md) before reporting a security issue.
 
 Contributions are welcome. See [CONTRIBUTING.md](./CONTRIBUTING.md).
 
+## Third-party code
+
+Vendored libraries under `src/libs/` keep their upstream licenses and attribution. See [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md).
+
 ## Disclaimer
 
 This project is not affiliated with, endorsed by, or sponsored by Etsy. Etsy pages and APIs can change, which may break integration behavior.
