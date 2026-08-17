@@ -62,6 +62,7 @@
                 "content/providers/custom_openai_service.js",
                 "content/ai_service_factory.js",
                 "content/agent_management_gate.js",
+                "content/agent_image_request_gate.js",
                 "content/image_modal.js",
                 "content/chat_manager.js",
                 "content/content.js",
