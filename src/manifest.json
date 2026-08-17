@@ -8,6 +8,7 @@
         "activeTab",
         "tabs",
         "storage",
+        "unlimitedStorage",
         "downloads",
         "alarms",
         "offscreen"
@@ -65,6 +66,7 @@
                 "content/chat_manager.js",
                 "content/content.js",
                 "content/agent_scope_guard.js",
+                "content/agent_ai_budget_guard.js",
                 "content/agent_output_guard.js",
                 "content/chat_ui.js",
                 "content/chat_submission_guard.js"
