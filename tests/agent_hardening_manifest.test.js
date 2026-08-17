@@ -16,6 +16,7 @@ for (const required of [
     'content/agent_auxiliary_prompt_guard.js',
     'content/agent_context_manager.js',
     'content/agent_management_gate.js',
+    'content/agent_image_request_gate.js',
     'content/agent_scope_guard.js',
     'content/agent_vision_metadata_guard.js',
     'content/agent_ai_budget_guard.js',
@@ -31,6 +32,7 @@ assert.ok(index('content/image_intelligence_manager.js') < index('content/agent_
 assert.ok(index('content/agent_vision_metadata_guard.js') < index('content/etsy_context_interceptor.js'));
 assert.ok(index('content/base_ai_service.js') < index('content/agent_context_manager.js'));
 assert.ok(index('content/ai_service_factory.js') < index('content/agent_management_gate.js'));
+assert.ok(index('content/agent_management_gate.js') < index('content/agent_image_request_gate.js'));
 assert.ok(index('content/content.js') < index('content/agent_scope_guard.js'));
 assert.ok(index('content/agent_scope_guard.js') < index('content/agent_ai_budget_guard.js'));
 assert.ok(index('content/agent_ai_budget_guard.js') < index('content/agent_output_guard.js'));
@@ -82,6 +84,13 @@ assert.doesNotMatch(vision, /listingContext: listingContext/);
 const visionGuard = read('src/content/agent_vision_metadata_guard.js');
 assert.match(visionGuard, /hasHydratedLiveHistory/);
 assert.match(visionGuard, /metadataConversationId/);
+assert.match(visionGuard, /imageIntelPendingCount/);
+
+const imageRequestGate = read('src/content/agent_image_request_gate.js');
+assert.match(imageRequestGate, /MAX_IMAGE_WAIT_MS = 1000/);
+assert.match(imageRequestGate, /isImageSpecificRequest/);
+assert.match(imageRequestGate, /waitForCurrentAnalysis/);
+assert.match(imageRequestGate, /replaceImageContext/);
 
 const budgetGuard = read('src/content/agent_ai_budget_guard.js');
 assert.match(budgetGuard, /if \(isMessagesPage\(\)\) return false/);
