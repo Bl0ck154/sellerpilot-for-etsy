@@ -1,302 +1,36 @@
 // agent_context_manager.js - Compact deterministic orientation for the active Etsy scope.
 (() => {
     'use strict';
-
-    if (!window.BaseAIService) return;
-
-    const ACTIVE_FACTS_KEY = 'ETSY_AI_ACTIVE_CONTEXT_FACTS';
-    const LISTING_SCOPE_KEY = 'ETSY_CURRENT_LISTING_SCOPE';
-    const MAX_ASSISTANT_HISTORY_MESSAGES = 32;
-    const FIRST_ASSISTANT_HISTORY_MESSAGES = 6;
-    const MAX_ASSISTANT_MESSAGE_CHARS = 4000;
-    const MAX_SNAPSHOT_MESSAGE_CHARS = 1200;
-
-    function trimText(value, maxChars = MAX_SNAPSHOT_MESSAGE_CHARS) {
-        const text = String(value || '').replace(/\s+/g, ' ').trim();
-        if (!text) return '';
-        return text.length > maxChars ? `${text.slice(0, maxChars).trim()}…` : text;
+    if(!window.BaseAIService)return;
+    const ACTIVE_FACTS_KEY='ETSY_AI_ACTIVE_CONTEXT_FACTS',LISTING_SCOPE_KEY='ETSY_CURRENT_LISTING_SCOPE',MAX_ASSISTANT_HISTORY_MESSAGES=32,FIRST_ASSISTANT_HISTORY_MESSAGES=6,MAX_ASSISTANT_MESSAGE_CHARS=4000,MAX_SNAPSHOT_MESSAGE_CHARS=1200;
+    const trimText=(value,max=MAX_SNAPSHOT_MESSAGE_CHARS)=>{const text=String(value||'').replace(/\s+/g,' ').trim();return!text?'':text.length>max?`${text.slice(0,max).trim()}…`:text;};
+    const liveConvo=()=>location.pathname.match(/^\/messages\/(\d+)/)?.[1]||null;
+    const body=m=>trimText(m?.message_body||m?.message||m?.body||m?.text||'');
+    const senderId=m=>String(m?.sender_user_id||m?.sender_id||m?.user_id||m?.from_user_id||'').trim();
+    function role(m,h){const s=senderId(m),customer=String(h?.customer_user_id||'').trim();if(customer&&s)return customer===s?'CUSTOMER':'OWNER';const rt=`${m?.sender_type||''} ${m?.role||''} ${m?.author_role||''}`.toLowerCase();if(/\b(buyer|customer)\b/.test(rt))return'CUSTOMER';if(/\b(seller|shop|owner|merchant)\b/.test(rt))return'OWNER';if(m?.is_customer===true)return'CUSTOMER';if(m?.is_seller===true||m?.is_shop_member===true||m?.from_owner===true)return'OWNER';const cn=trimText(h?.customer_display_name||'',100).toLowerCase(),sn=trimText(m?.sender_display_name||m?.sender_name||'',100).toLowerCase();return cn&&sn&&cn===sn?'CUSTOMER':'PARTICIPANT';}
+    function timeMs(m){const v=m?.create_date??m?.created_at??m?.timestamp??0,n=Number(v);if(Number.isFinite(n)&&n>0)return n<10_000_000_000?n*1000:n;const p=Date.parse(String(v||''));return Number.isFinite(p)?p:0;}
+    function stamp(m){const ms=timeMs(m);if(!ms)return'';try{return new Date(ms).toLocaleString();}catch(_){return'';}}
+    function attachmentCount(m){if(Array.isArray(m?.attachments))return m.attachments.length;if(Array.isArray(m?.images))return m.images.length;return m?.has_images?1:0;}
+    async function get(keys){if(!chrome.runtime?.id)return{};try{return await chrome.storage.local.get(keys);}catch(e){console.warn('AgentContext: storage read failed',e);return{};}}
+    async function set(values){if(!chrome.runtime?.id)return false;try{await chrome.storage.local.set(values);return true;}catch(e){console.warn('AgentContext: storage write failed',e);return false;}}
+    async function readHistory(convoId){if(window.ScopedConversationStore)return window.ScopedConversationStore.getHistory(convoId);const s=await get(['ETSY_CHAT_HISTORY']),h=s.ETSY_CHAT_HISTORY;return String(h?.convo_id||'')===String(convoId)?h:null;}
+    async function readFacts(convoId){if(window.ScopedConversationStore)return window.ScopedConversationStore.getFacts(convoId);const s=await get([ACTIVE_FACTS_KEY]),f=s[ACTIVE_FACTS_KEY];return String(f?.convoId||'')===String(convoId)?f:null;}
+    async function writeFacts(facts){if(window.ScopedConversationStore)return window.ScopedConversationStore.setFacts(facts);return set({[ACTIVE_FACTS_KEY]:facts});}
+    async function readListingId(convoId){if(window.ScopedConversationStore)return(await window.ScopedConversationStore.getListing(convoId))?.listingId||null;if(window.EtsyAgentScopeGuard?.getScopedListingId)return window.EtsyAgentScopeGuard.getScopedListingId();const s=await get(['ETSY_CURRENT_LISTING_ID',LISTING_SCOPE_KEY]),listing=String(s.ETSY_CURRENT_LISTING_ID||'').trim(),scope=s[LISTING_SCOPE_KEY];return listing&&String(scope?.convoId||'')===String(convoId)&&String(scope?.listingId||'')===listing?listing:null;}
+    function latestByRole(messages,h,wanted){for(let i=messages.length-1;i>=0;i--)if(role(messages[i],h)===wanted)return messages[i];return null;}
+    function format(label,m){if(!m)return`${label}: none available`;const sender=trimText(m.sender_display_name||m.sender_name||'',80),time=stamp(m),text=body(m),attachments=attachmentCount(m);return`${label}${sender?` (${sender})`:''}${time?` [${time}]`:''}: ${text||'[no text]'}${attachments?` [${attachments} attachment(s)]`:''}`;}
+    async function buildActiveContextSnapshot(){
+        const convoId=liveConvo();if(!convoId)return'';const[history,facts,listingId]=await Promise.all([readHistory(convoId),readFacts(convoId),readListingId(convoId)]),stored=String(history?.convo_id||'').trim(),matches=!!history?.messages?.length&&stored===String(convoId);let out='\n\n### ACTIVE_CONTEXT_SNAPSHOT\n(Deterministic orientation for the live Etsy conversation. Use as an index only; direct conversation/listing/image evidence is authoritative. Never borrow facts from another conversation.)\n';out+=`Live conversation: convo_id=${convoId}\n`;if(!matches){out+=`Conversation data: not ready or mismatched (stored=${stored||'none'}). Treat customer/order/listing/image facts as unavailable until live scope is hydrated.\n`;return out;}
+        const messages=history.messages||[],latestCustomer=latestByRole(messages,history,'CUSTOMER'),latestOwner=latestByRole(messages,history,'OWNER'),latest=messages[messages.length-1]||null,latestRole=latest?role(latest,history):'UNKNOWN',customerName=trimText(history.customer_display_name||'',100)||'unknown',timestamp=Number(history.timestamp||0),age=timestamp?Math.max(0,Date.now()-timestamp):0,totalAttachments=messages.reduce((sum,m)=>sum+attachmentCount(m),0);
+        out+=`Customer: ${customerName}\nConversation messages: ${messages.length}; context age: ${timestamp?BaseAIService.INSTRUCTIONS.formatAge(age):'unknown'}; latest speaker: ${latestRole}\n${format('Latest CUSTOMER message',latestCustomer)}\n${format('Latest OWNER Etsy message',latestOwner)}\nStructured conversation attachments: ${totalAttachments}\n`;
+        if(listingId){const s=await get([`RAG_LISTING_${listingId}`]),listing=s[`RAG_LISTING_${listingId}`];out+=`Active listing: listing_id=${listingId}${listing?.title?` — ${trimText(listing.title,220)}`:' (details not cached yet)'}\n`;}else out+='Active listing: unresolved for this conversation; do not reuse a listing from another conversation.\n';
+        if(facts?.receiptId)out+=`Current receipt: ${facts.receiptId}\n`;if(facts?.transactionIds?.length)out+=`Current transaction id(s): ${facts.transactionIds.join(', ')}\n`;
+        const vm=window.ImageIntelligenceManager?.getMetadata?.();if(vm&&Number.isFinite(Number(vm.imageIntelCount))){const total=Number(vm.imageIntelCount)||0,available=Number(vm.imageIntelAvailableCount)||0,pending=Number(vm.imageIntelPendingCount)||0;out+=`Vision cache: ${available}/${total} image context item(s) analyzed${pending?`; ${pending} pending`:''}${vm.imageIntelErrors?.length?`; ${vm.imageIntelErrors.length} recent analysis error(s)`:''}\n`;}
+        out+='Reasoning priority: current Owner request → latest explicit active-conversation corrections → earlier active-conversation requirements/commitments → active listing defaults → derived summaries. Keep Owner↔assistant dialogue distinct from Owner↔customer Etsy messages.\n';return out;
     }
-
-    function getLiveConversationId() {
-        return location.pathname.match(/^\/messages\/(\d+)/)?.[1] || null;
-    }
-
-    function getMessageBody(message) {
-        return trimText(message?.message_body || message?.message || message?.body || message?.text || '');
-    }
-
-    function getSenderId(message) {
-        return String(
-            message?.sender_user_id || message?.sender_id || message?.user_id || message?.from_user_id || ''
-        ).trim();
-    }
-
-    function participantRole(message, chatHistory) {
-        const senderId = getSenderId(message);
-        const customerId = String(chatHistory?.customer_user_id || '').trim();
-        if (customerId && senderId) return customerId === senderId ? 'CUSTOMER' : 'OWNER';
-
-        const roleText = `${message?.sender_type || ''} ${message?.role || ''} ${message?.author_role || ''}`
-            .toLowerCase();
-        if (/\b(buyer|customer)\b/.test(roleText)) return 'CUSTOMER';
-        if (/\b(seller|shop|owner|merchant)\b/.test(roleText)) return 'OWNER';
-        if (message?.is_customer === true) return 'CUSTOMER';
-        if (message?.is_seller === true || message?.is_shop_member === true || message?.from_owner === true) {
-            return 'OWNER';
-        }
-
-        const customerName = trimText(chatHistory?.customer_display_name || '', 100).toLowerCase();
-        const senderName = trimText(message?.sender_display_name || message?.sender_name || '', 100).toLowerCase();
-        if (customerName && senderName && customerName === senderName) return 'CUSTOMER';
-
-        return 'PARTICIPANT';
-    }
-
-    function messageTimestampMs(message) {
-        const value = message?.create_date ?? message?.created_at ?? message?.timestamp ?? 0;
-        const numeric = Number(value);
-        if (Number.isFinite(numeric) && numeric > 0) {
-            return numeric < 10_000_000_000 ? numeric * 1000 : numeric;
-        }
-        const parsed = Date.parse(String(value || ''));
-        return Number.isFinite(parsed) ? parsed : 0;
-    }
-
-    function formatTimestamp(message) {
-        const ms = messageTimestampMs(message);
-        if (!ms) return '';
-        try { return new Date(ms).toLocaleString(); }
-        catch (_) { return ''; }
-    }
-
-    function attachmentCount(message) {
-        if (Array.isArray(message?.attachments)) return message.attachments.length;
-        if (Array.isArray(message?.images)) return message.images.length;
-        return message?.has_images ? 1 : 0;
-    }
-
-    async function storageGet(keys) {
-        if (!chrome.runtime?.id) return {};
-        try { return await chrome.storage.local.get(keys); }
-        catch (error) {
-            console.warn('AgentContext: storage read failed', error);
-            return {};
-        }
-    }
-
-    async function storageSet(values) {
-        if (!chrome.runtime?.id) return false;
-        try {
-            await chrome.storage.local.set(values);
-            return true;
-        } catch (error) {
-            console.warn('AgentContext: storage write failed', error);
-            return false;
-        }
-    }
-
-    function findLatestByRole(messages, chatHistory, role) {
-        for (let index = messages.length - 1; index >= 0; index -= 1) {
-            if (participantRole(messages[index], chatHistory) === role) return messages[index];
-        }
-        return null;
-    }
-
-    function formatSnapshotMessage(label, message) {
-        if (!message) return `${label}: none available`;
-        const sender = trimText(message.sender_display_name || message.sender_name || '', 80);
-        const time = formatTimestamp(message);
-        const body = getMessageBody(message);
-        const attachments = attachmentCount(message);
-        return `${label}${sender ? ` (${sender})` : ''}${time ? ` [${time}]` : ''}: ` +
-            `${body || '[no text]'}${attachments ? ` [${attachments} attachment(s)]` : ''}`;
-    }
-
-    async function getScopedListingId(state, liveConvoId) {
-        if (window.EtsyAgentScopeGuard?.getScopedListingId) {
-            return window.EtsyAgentScopeGuard.getScopedListingId();
-        }
-        const listingId = String(state.ETSY_CURRENT_LISTING_ID || '').trim();
-        const scope = state[LISTING_SCOPE_KEY];
-        if (!listingId ||
-            String(scope?.convoId || '') !== String(liveConvoId) ||
-            String(scope?.listingId || '') !== listingId) {
-            return null;
-        }
-        return listingId;
-    }
-
-    async function buildActiveContextSnapshot() {
-        const liveConvoId = getLiveConversationId();
-        if (!liveConvoId) return '';
-
-        const state = await storageGet([
-            'ETSY_CHAT_HISTORY',
-            'ETSY_CURRENT_LISTING_ID',
-            LISTING_SCOPE_KEY,
-            ACTIVE_FACTS_KEY
-        ]);
-        const chatHistory = state.ETSY_CHAT_HISTORY || null;
-        const storedConvoId = String(chatHistory?.convo_id || '').trim();
-        const historyMatches = !!chatHistory?.messages?.length && storedConvoId === String(liveConvoId);
-
-        let snapshot = '\n\n### ACTIVE_CONTEXT_SNAPSHOT\n';
-        snapshot += '(Deterministic orientation for the live Etsy conversation. Use as an index only; direct conversation/listing/image evidence is authoritative. Never borrow facts from another conversation.)\n';
-        snapshot += `Live conversation: convo_id=${liveConvoId}\n`;
-
-        if (!historyMatches) {
-            snapshot += `Conversation data: not ready or mismatched (stored=${storedConvoId || 'none'}). Treat customer/order/listing/image facts as unavailable until live scope is hydrated.\n`;
-            return snapshot;
-        }
-
-        const messages = chatHistory.messages || [];
-        const latestCustomer = findLatestByRole(messages, chatHistory, 'CUSTOMER');
-        const latestOwner = findLatestByRole(messages, chatHistory, 'OWNER');
-        const latest = messages[messages.length - 1] || null;
-        const latestRole = latest ? participantRole(latest, chatHistory) : 'UNKNOWN';
-        const customerName = trimText(chatHistory.customer_display_name || '', 100) || 'unknown';
-        const timestamp = Number(chatHistory.timestamp || 0);
-        const ageMs = timestamp > 0 ? Math.max(0, Date.now() - timestamp) : 0;
-        const totalAttachments = messages.reduce((sum, message) => sum + attachmentCount(message), 0);
-
-        snapshot += `Customer: ${customerName}\n`;
-        snapshot += `Conversation messages: ${messages.length}; context age: ${timestamp ? BaseAIService.INSTRUCTIONS.formatAge(ageMs) : 'unknown'}; latest speaker: ${latestRole}\n`;
-        snapshot += `${formatSnapshotMessage('Latest CUSTOMER message', latestCustomer)}\n`;
-        snapshot += `${formatSnapshotMessage('Latest OWNER Etsy message', latestOwner)}\n`;
-        snapshot += `Structured conversation attachments: ${totalAttachments}\n`;
-
-        const listingId = await getScopedListingId(state, liveConvoId);
-        if (listingId) {
-            const listingState = await storageGet([`RAG_LISTING_${listingId}`]);
-            const listing = listingState[`RAG_LISTING_${listingId}`];
-            snapshot += `Active listing: listing_id=${listingId}${listing?.title ? ` — ${trimText(listing.title, 220)}` : ' (details not cached yet)'}\n`;
-        } else {
-            snapshot += 'Active listing: unresolved for this conversation; do not reuse a listing from another conversation.\n';
-        }
-
-        const facts = state[ACTIVE_FACTS_KEY];
-        if (facts?.convoId === String(liveConvoId)) {
-            if (facts.receiptId) snapshot += `Current receipt: ${facts.receiptId}\n`;
-            if (facts.transactionIds?.length) snapshot += `Current transaction id(s): ${facts.transactionIds.join(', ')}\n`;
-        }
-
-        const imageMetadata = window.ImageIntelligenceManager?.getMetadata?.();
-        if (imageMetadata && Number.isFinite(Number(imageMetadata.imageIntelCount))) {
-            snapshot += `Vision cache: ${Number(imageMetadata.imageIntelCount) || 0} analyzed image context item(s)` +
-                `${imageMetadata.imageIntelErrors?.length ? `; ${imageMetadata.imageIntelErrors.length} recent analysis error(s)` : ''}\n`;
-        }
-
-        snapshot += 'Reasoning priority: current Owner request → latest explicit active-conversation corrections → earlier active-conversation requirements/commitments → active listing defaults → derived summaries. Keep Owner↔assistant dialogue distinct from Owner↔customer Etsy messages.\n';
-        return snapshot;
-    }
-
-    async function recordDetailFacts(data, ordering = {}) {
-        const detail = data?.detail;
-        if (!detail || !chrome.runtime?.id) return false;
-
-        const liveConvoId = getLiveConversationId();
-        const convoId = String(detail.conversation_id || '').trim();
-        if (!liveConvoId || convoId !== String(liveConvoId)) return false;
-
-        const requestSequence = Number(ordering.requestSequence);
-        const hasOrderedSource = Number.isFinite(requestSequence) && requestSequence >= 0;
-        const sourceSessionId = window.EtsyContextInterceptor?.getSessionId?.() || null;
-
-        if (hasOrderedSource && sourceSessionId) {
-            const existingState = await storageGet([ACTIVE_FACTS_KEY]);
-            const existing = existingState[ACTIVE_FACTS_KEY];
-            if (existing?.convoId === convoId &&
-                existing.sourceSessionId === sourceSessionId &&
-                Number(existing.sourceSequence || 0) > requestSequence) {
-                return false;
-            }
-        }
-
-        const receipt = detail.receipt_history?.[0] || null;
-        const transactionIds = (receipt?.transactions || [])
-            .map(item => item?.transaction_id)
-            .filter(Boolean)
-            .map(String);
-        const nextFacts = {
-            convoId,
-            receiptId: receipt?.receipt_id ? String(receipt.receipt_id) : null,
-            transactionIds,
-            updatedAt: Date.now()
-        };
-        if (hasOrderedSource && sourceSessionId) {
-            nextFacts.sourceSessionId = sourceSessionId;
-            nextFacts.sourceSequence = requestSequence;
-        }
-
-        await storageSet({ [ACTIVE_FACTS_KEY]: nextFacts });
-        return true;
-    }
-
-    window.addEventListener('message', event => {
-        if (event.source !== window || event.data?.source !== 'etsy-page-interceptor') return;
-        if (event.data?.type !== 'ETSY_DETAIL_VIEW_DATA') return;
-        recordDetailFacts(event.data.data, {
-            requestSequence: event.data.requestSequence,
-            requestStartedAt: event.data.requestStartedAt
-        }).catch(error => {
-            console.debug('AgentContext: detail facts update failed', error?.message || error);
-        });
-    });
-
-    const instructions = BaseAIService.INSTRUCTIONS;
-    const originalBuildFullInstruction = instructions.buildFullInstruction;
-    instructions.buildFullInstruction = async function (context) {
-        const [baseInstruction, snapshot] = await Promise.all([
-            originalBuildFullInstruction.call(this, context),
-            buildActiveContextSnapshot()
-        ]);
-        if (!snapshot) return baseInstruction;
-
-        const pageScopeIndex = baseInstruction.lastIndexOf('\n\n[PAGE_SCOPE:');
-        if (pageScopeIndex === -1) return `${baseInstruction}${snapshot}`;
-        return `${baseInstruction.slice(0, pageScopeIndex)}${snapshot}${baseInstruction.slice(pageScopeIndex)}`;
-    };
-
-    BaseAIService.prototype.buildConversationHistory = async function (userId, currentUserMessage) {
-        const key = userId && String(userId).startsWith('current_chat_messages')
-            ? String(userId)
-            : 'current_chat_messages';
-        const messages = [];
-
-        try {
-            const result = await chrome.storage.local.get([key]);
-            const allHistory = (result[key] || [])
-                .filter(message => message?.type === 'user' || message?.type === 'ai');
-            const history = allHistory.length <= MAX_ASSISTANT_HISTORY_MESSAGES
-                ? allHistory
-                : [
-                    ...allHistory.slice(0, FIRST_ASSISTANT_HISTORY_MESSAGES),
-                    ...allHistory.slice(-(MAX_ASSISTANT_HISTORY_MESSAGES - FIRST_ASSISTANT_HISTORY_MESSAGES))
-                ];
-
-            for (const message of history) {
-                messages.push({
-                    role: message.type === 'user' ? 'user' : 'assistant',
-                    content: this.trimMessageText(message.text, MAX_ASSISTANT_MESSAGE_CHARS)
-                });
-            }
-        } catch (error) {
-            console.warn('AgentContext: failed to load assistant conversation history', error);
-        }
-
-        const currentContent = this.trimMessageText(currentUserMessage, MAX_ASSISTANT_MESSAGE_CHARS);
-        const lastMessage = messages[messages.length - 1];
-        if (!lastMessage || lastMessage.role !== 'user' || lastMessage.content !== currentContent) {
-            messages.push({ role: 'user', content: currentContent });
-        }
-        return messages;
-    };
-
-    window.AgentContextManager = {
-        ACTIVE_FACTS_KEY,
-        MAX_ASSISTANT_HISTORY_MESSAGES,
-        buildActiveContextSnapshot,
-        recordDetailFacts,
-        enrichDetailViewData: recordDetailFacts
-    };
+    async function recordDetailFacts(data,ordering={}){const detail=data?.detail;if(!detail||!chrome.runtime?.id)return false;const live=liveConvo(),convoId=String(detail.conversation_id||'').trim();if(!live||convoId!==String(live))return false;const requestSequence=Number(ordering.requestSequence),ordered=Number.isFinite(requestSequence)&&requestSequence>=0,sessionId=window.EtsyContextInterceptor?.getSessionId?.()||null,existing=await readFacts(convoId);if(ordered&&sessionId&&existing?.sourceSessionId===sessionId&&Number(existing.sourceSequence||0)>requestSequence)return false;const receipt=detail.receipt_history?.[0]||null,facts={convoId,receiptId:receipt?.receipt_id?String(receipt.receipt_id):null,transactionIds:(receipt?.transactions||[]).map(x=>x?.transaction_id).filter(Boolean).map(String),updatedAt:Date.now()};if(ordered&&sessionId){facts.sourceSessionId=sessionId;facts.sourceSequence=requestSequence;}await writeFacts(facts);return true;}
+    window.addEventListener('message',event=>{if(event.source!==window||event.data?.source!=='etsy-page-interceptor'||event.data?.type!=='ETSY_DETAIL_VIEW_DATA')return;recordDetailFacts(event.data.data,{requestSequence:event.data.requestSequence,requestStartedAt:event.data.requestStartedAt}).catch(e=>console.debug('AgentContext: detail facts update failed',e?.message||e));});
+    const instructions=BaseAIService.INSTRUCTIONS,originalBuild=instructions.buildFullInstruction;instructions.buildFullInstruction=async function(context){const[base,snapshot]=await Promise.all([originalBuild.call(this,context),buildActiveContextSnapshot()]);if(!snapshot)return base;const i=base.lastIndexOf('\n\n[PAGE_SCOPE:');return i===-1?`${base}${snapshot}`:`${base.slice(0,i)}${snapshot}${base.slice(i)}`;};
+    BaseAIService.prototype.buildConversationHistory=async function(userId,currentUserMessage){const key=userId&&String(userId).startsWith('current_chat_messages')?String(userId):'current_chat_messages',messages=[];try{const s=await chrome.storage.local.get([key]),all=(s[key]||[]).filter(m=>m?.type==='user'||m?.type==='ai'),history=all.length<=MAX_ASSISTANT_HISTORY_MESSAGES?all:[...all.slice(0,FIRST_ASSISTANT_HISTORY_MESSAGES),...all.slice(-(MAX_ASSISTANT_HISTORY_MESSAGES-FIRST_ASSISTANT_HISTORY_MESSAGES))];for(const m of history)messages.push({role:m.type==='user'?'user':'assistant',content:this.trimMessageText(m.text,MAX_ASSISTANT_MESSAGE_CHARS)});}catch(e){console.warn('AgentContext: assistant history read failed',e);}const current=this.trimMessageText(currentUserMessage,MAX_ASSISTANT_MESSAGE_CHARS),last=messages[messages.length-1];if(!last||last.role!=='user'||last.content!==current)messages.push({role:'user',content:current});return messages;};
+    window.AgentContextManager={ACTIVE_FACTS_KEY,MAX_ASSISTANT_HISTORY_MESSAGES,buildActiveContextSnapshot,recordDetailFacts,enrichDetailViewData:recordDetailFacts};
 })();
