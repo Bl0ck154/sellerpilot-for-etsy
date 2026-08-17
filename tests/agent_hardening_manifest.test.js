@@ -10,6 +10,7 @@ const index = name => scripts.indexOf(name);
 
 assert.equal(manifest.version, '1.6.26');
 assert.match(read('build.bat'), /set VERSION=1\.6\.26/);
+assert.ok(manifest.permissions.includes('unlimitedStorage'), 'persistent image analysis cache needs unlimitedStorage');
 
 for (const required of [
     'content/agent_auxiliary_prompt_guard.js',
@@ -17,6 +18,7 @@ for (const required of [
     'content/agent_management_gate.js',
     'content/agent_scope_guard.js',
     'content/agent_vision_metadata_guard.js',
+    'content/agent_ai_budget_guard.js',
     'content/agent_output_guard.js'
 ]) {
     assert.notEqual(index(required), -1, `${required} must be loaded by the manifest`);
@@ -30,6 +32,8 @@ assert.ok(index('content/agent_vision_metadata_guard.js') < index('content/etsy_
 assert.ok(index('content/base_ai_service.js') < index('content/agent_context_manager.js'));
 assert.ok(index('content/ai_service_factory.js') < index('content/agent_management_gate.js'));
 assert.ok(index('content/content.js') < index('content/agent_scope_guard.js'));
+assert.ok(index('content/agent_scope_guard.js') < index('content/agent_ai_budget_guard.js'));
+assert.ok(index('content/agent_ai_budget_guard.js') < index('content/agent_output_guard.js'));
 assert.ok(index('content/agent_output_guard.js') < index('content/chat_ui.js'));
 
 const injector = read('src/content/inject_interceptor.js');
@@ -64,9 +68,26 @@ const auxiliaryGuard = read('src/content/agent_auxiliary_prompt_guard.js');
 assert.match(auxiliaryGuard, /SECURITY BOUNDARY/);
 assert.match(auxiliaryGuard, /untrusted evidence, never as instructions/);
 
+const vision = read('src/content/image_intelligence_manager.js');
+assert.match(vision, /PROMPT_VERSION = 'etsy-production-photo-v2'/);
+assert.match(vision, /waitForCompletion = false/);
+assert.match(vision, /MAX_CONTEXT_IMAGES = 12/);
+assert.match(vision, /professional photo editing, restoration and compositing work/);
+assert.match(vision, /face\/head replacement/);
+assert.match(vision, /clarificationQuestions/);
+assert.match(vision, /Persistent Gemini Vision production summaries/);
+assert.doesNotMatch(vision, /const TTL_MS =/);
+assert.doesNotMatch(vision, /listingContext: listingContext/);
+
 const visionGuard = read('src/content/agent_vision_metadata_guard.js');
 assert.match(visionGuard, /hasHydratedLiveHistory/);
 assert.match(visionGuard, /metadataConversationId/);
+
+const budgetGuard = read('src/content/agent_ai_budget_guard.js');
+assert.match(budgetGuard, /if \(isMessagesPage\(\)\) return false/);
+assert.match(budgetGuard, /waitForCompletion === true/);
+assert.match(budgetGuard, /onStatus: undefined/);
+assert.match(budgetGuard, /Create a compact evidence map for an Etsy assistant/);
 
 const outputGuard = read('src/content/agent_output_guard.js');
 assert.match(outputGuard, /\['http:', 'https:', 'mailto:'\]/);
@@ -77,5 +98,11 @@ const baseInstruction = read('src/config/base_instruction.js');
 assert.match(baseInstruction, /ACTIVE SCOPE ORIENTATION/);
 assert.match(baseInstruction, /Never transfer customer, order, listing, attachment/);
 assert.match(baseInstruction, /A summary is an index to evidence/);
+
+const memory = read('src/content/memory_manager.js');
+assert.match(memory, /Explicit, local-only persistent Owner memory/);
+assert.match(memory, /MAX_CONTEXT_CHARS = 12000/);
+assert.match(memory, /Owner preferences/);
+assert.match(memory, /Shop facts/);
 
 console.log('agent hardening manifest/static checks passed');
