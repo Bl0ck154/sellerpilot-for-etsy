@@ -30,6 +30,25 @@
         shopManager.__etsyBudgetGuarded = true;
     }
 
+    const conversationManager = window.ConversationContextManager;
+    if (conversationManager && !conversationManager.__etsyForegroundBudgetGuarded &&
+        typeof conversationManager.getOrCreateSummary === 'function') {
+        const originalGetOrCreateSummary = conversationManager.getOrCreateSummary.bind(conversationManager);
+        conversationManager.getOrCreateSummary = function (chatHistory, omittedMessages, options = {}) {
+            // Exceptionally long Etsy threads may need semantic compression, but the main
+            // Owner request should not sit behind another model call. Start/continue the
+            // cached summary in background and use it on a later turn when ready.
+            if (isMessagesPage() && options.maxWaitMs === undefined) {
+                return originalGetOrCreateSummary(chatHistory, omittedMessages, {
+                    ...options,
+                    maxWaitMs: 0
+                });
+            }
+            return originalGetOrCreateSummary(chatHistory, omittedMessages, options);
+        };
+        conversationManager.__etsyForegroundBudgetGuarded = true;
+    }
+
     const imageManager = window.ImageIntelligenceManager;
     if (imageManager && !imageManager.__etsyBackgroundSilent && typeof imageManager.analyzeCurrentCustomerImages === 'function') {
         const originalAnalyzeImages = imageManager.analyzeCurrentCustomerImages.bind(imageManager);
