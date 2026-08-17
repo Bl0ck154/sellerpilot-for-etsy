@@ -1,0 +1,60 @@
+name: Feature request
+description: Suggest a focused improvement for SellerPilot for Etsy
+title: "[Feature]: "
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Keep requests focused on a concrete seller workflow or technical improvement. Do not include private Etsy/customer data.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or workflow
+      description: What seller problem would this solve?
+      placeholder: Describe the workflow or limitation.
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed behavior
+      description: What would you like SellerPilot to do?
+      placeholder: Describe the desired behavior.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Optional. Mention workarounds or alternative designs you considered.
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - AI / prompts / providers
+        - Etsy context extraction
+        - Conversations / replies
+        - Listings
+        - Image workflows
+        - Memory / quick replies
+        - Browser compatibility
+        - Privacy / security
+        - UI / accessibility
+        - Build / developer experience
+        - Other
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy check
+      options:
+        - label: This request contains no API keys, private customer data, cookies, or account credentials.
+          required: true
