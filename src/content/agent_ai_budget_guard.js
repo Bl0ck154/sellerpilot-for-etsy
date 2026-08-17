@@ -56,6 +56,18 @@
             if (options?.waitForCompletion === true) return originalAnalyzeImages(options);
             return originalAnalyzeImages({ ...options, onStatus: undefined, waitForCompletion: false });
         };
+
+        if (typeof imageManager.waitForCurrentAnalysis === 'function') {
+            const originalWaitForCurrentAnalysis = imageManager.waitForCurrentAnalysis.bind(imageManager);
+            imageManager.waitForCurrentAnalysis = async function (maxWaitMs = 1000) {
+                // Wait only for the cheap enqueue/storage phase first. This closes the race
+                // where waitForCurrentAnalysis checked imageJobs before async cache reads had
+                // registered the background jobs, while still never awaiting the heavy Vision work here.
+                await imageManager.analyzeCurrentCustomerImages({ waitForCompletion: false });
+                return originalWaitForCurrentAnalysis(maxWaitMs);
+            };
+        }
+
         imageManager.__etsyBackgroundSilent = true;
     }
 
