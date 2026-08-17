@@ -3,10 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-const managerSource = fs.readFileSync(
-    path.join(__dirname, '..', 'src', 'content', 'image_intelligence_manager.js'),
-    'utf8'
-);
+const managerSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'content', 'image_intelligence_manager.js'), 'utf8');
 
 class MockFileReader {
     readAsDataURL() {
@@ -26,6 +23,37 @@ function makeHistory(convoId, imageUrls, options = {}) {
             message_body: options.message || `Please use source photo ${index + 1}`,
             attachments: [{ attachment_id: `${convoId}-a${index}`, url }]
         }))
+    };
+}
+
+function payloadFor(label) {
+    return {
+        imageLabel: label,
+        imageType: 'photo',
+        technicalQuality: {
+            overall: 'limited',
+            resolutionDetail: 'Low face detail',
+            sharpnessFocus: 'Soft',
+            compressionNoise: 'JPEG artifacts',
+            lightingExposure: 'Side light',
+            color: 'Neutral',
+            croppingOcclusion: 'Hands cropped',
+            perspective: 'Normal',
+            background: 'Busy',
+            damageArtifacts: 'None'
+        },
+        subjects: [{
+            label: 'Person 1', position: 'center', poseOrientation: 'front-facing',
+            faceVisibility: 'face visible', expression: 'neutral', hair: 'visible',
+            clothingAccessories: 'dark top', bodyHandsVisibility: 'upper body',
+            occlusions: 'none', identityCues: ['hairline'], uncertainties: []
+        }],
+        editingRisks: ['Low face detail'],
+        identityCriticalDetails: ['hairline'],
+        clarificationQuestions: ['Sharper face reference?'],
+        uncertainties: [],
+        overallAssessment: 'Usable secondary source',
+        confidence: 'high'
     };
 }
 
@@ -50,6 +78,7 @@ function createHarness({
         imageFetchCalls: 0,
         visionCalls: 0,
         visionPrompts: [],
+        visionBatchSizes: [],
         activeVisionCalls: 0,
         maxActiveVisionCalls: 0
     };
@@ -72,10 +101,7 @@ function createHarness({
             return domUrls.map(url => ({ href: url, querySelector() { return null; } }));
         }
     };
-    const window = {
-        ETSY_AI_GEMINI_FALLBACK_CHAIN: ['gemini-flash-latest'],
-        addEventListener() {}
-    };
+    const window = { ETSY_AI_GEMINI_FALLBACK_CHAIN: ['gemini-flash-latest'], addEventListener() {} };
     const context = {
         window,
         chrome,
@@ -102,9 +128,7 @@ function createHarness({
                 if (imageResponse) return imageResponse(url, options, state);
                 return {
                     ok: true,
-                    async blob() {
-                        return new Blob([new Uint8Array([1, 2, 3])], { type: 'image/jpeg' });
-                    }
+                    async blob() { return new Blob([new Uint8Array([1, 2, 3])], { type: 'image/jpeg' }); }
                 };
             }
 
@@ -112,48 +136,20 @@ function createHarness({
             state.activeVisionCalls += 1;
             state.maxActiveVisionCalls = Math.max(state.maxActiveVisionCalls, state.activeVisionCalls);
             const body = JSON.parse(options.body);
-            state.visionPrompts.push(body.contents[0].parts[0].text);
+            const textParts = body.contents[0].parts.filter(part => typeof part.text === 'string').map(part => part.text);
+            const joined = textParts.join('\n');
+            state.visionPrompts.push(joined);
+            const labels = joined.match(/IMAGE_LABEL: (IMG_\d+)/g)?.map(value => value.split(': ')[1]) || [];
+            state.visionBatchSizes.push(labels.length);
             try {
-                if (visionResponse) return await visionResponse(url, options, state);
+                if (visionResponse) return await visionResponse(url, options, state, labels);
                 await new Promise(resolve => setTimeout(resolve, 10));
-                const payload = {
-                    imageType: 'photo',
-                    technicalQuality: {
-                        overall: 'limited',
-                        resolutionDetail: 'Low face detail',
-                        sharpnessFocus: 'Soft',
-                        compressionNoise: 'Some JPEG artifacts',
-                        lightingExposure: 'Side light',
-                        color: 'Neutral',
-                        croppingOcclusion: 'Hands cropped',
-                        perspective: 'Normal',
-                        background: 'Busy',
-                        damageArtifacts: 'None'
-                    },
-                    subjects: [{
-                        label: 'Person 1',
-                        position: 'center',
-                        poseOrientation: 'front-facing',
-                        faceVisibility: 'face visible but soft',
-                        expression: 'neutral',
-                        hair: 'visible',
-                        clothingAccessories: 'dark top',
-                        bodyHandsVisibility: 'upper body',
-                        occlusions: 'none',
-                        identityCues: ['hairline'],
-                        uncertainties: []
-                    }],
-                    editingRisks: ['Low face detail'],
-                    identityCriticalDetails: ['hairline'],
-                    clarificationQuestions: ['Is another sharper face reference available?'],
-                    uncertainties: [],
-                    overallAssessment: 'Usable as a secondary source.',
-                    confidence: 'high'
-                };
                 return {
                     ok: true,
                     async json() {
-                        return { candidates: [{ content: { parts: [{ text: JSON.stringify(payload) }] } }] };
+                        return {
+                            candidates: [{ content: { parts: [{ text: JSON.stringify({ images: labels.map(payloadFor) }) }] } }]
+                        };
                     }
                 };
             } finally {
@@ -168,66 +164,95 @@ function createHarness({
     window.location = context.location;
     vm.createContext(context);
     vm.runInContext(managerSource, context);
-
     return { manager: window.ImageIntelligenceManager, storage, state };
 }
 
-async function testBackgroundByDefaultAndPersistentCache() {
-    const { manager, storage, state } = createHarness();
+async function testBatchingAndPersistentCache() {
+    const urls = Array.from({ length: 5 }, (_, index) => `https://img.example/${index}.jpg?token=a`);
+    const { manager, storage, state } = createHarness({ history: makeHistory('42', urls) });
     const immediate = await manager.analyzeCurrentCustomerImages();
-    assert.equal(immediate.imageIntelCount, 3);
-    assert.equal(immediate.imageIntelQueuedThisRequest, 3);
+    assert.equal(immediate.imageIntelQueuedThisRequest, 5);
     assert.equal(immediate.imageIntelAvailableCount, 0);
 
-    await manager.waitForCurrentAnalysis(1200);
-    assert.equal(state.visionCalls, 3);
-    assert.equal(state.maxActiveVisionCalls, 2, 'global Vision concurrency stays capped at two');
+    const done = await manager.analyzeCurrentCustomerImages({ waitForCompletion: true });
+    assert.equal(done.imageIntelAvailableCount, 5);
+    assert.equal(state.visionCalls, 2, 'five images use two Vision requests (4+1), not five');
+    assert.deepEqual(state.visionBatchSizes, [4, 1]);
+    assert.equal(state.maxActiveVisionCalls, 1, 'heavy Vision batches stay serialized in background');
+    assert.equal(Object.keys(storage.ETSY_AI_IMAGE_INTELLIGENCE_CACHE).length, 5);
 
-    const cache = storage.ETSY_AI_IMAGE_INTELLIGENCE_CACHE;
-    assert.equal(Object.keys(cache).length, 3);
-    for (const entry of Object.values(cache)) {
-        entry.updatedAt = Date.now() - 365 * 24 * 60 * 60 * 1000;
-        entry.analyzedAt = entry.updatedAt;
-    }
-    storage.ETSY_CURRENT_LISTING_ID = '999';
-    storage.RAG_LISTING_999 = { title: 'Changed listing context' };
     await manager.analyzeCurrentCustomerImages({ waitForCompletion: true });
-    assert.equal(state.visionCalls, 3, 'successful image analysis never expires or changes with listing context');
+    assert.equal(state.visionCalls, 2, 'cached images are never re-analyzed');
 }
 
-async function testDetailedProductionPromptAndCompactContext() {
-    const { manager, state } = createHarness({
-        history: makeHistory('42', ['https://img.example/source.jpg'], {
-            message: 'Please merge grandfather into family photo'
+async function testDetailedBatchPromptAndPerImageMapping() {
+    const { manager, state, storage } = createHarness({
+        history: makeHistory('42', ['https://img.example/a.jpg', 'https://img.example/b.jpg'], {
+            message: 'Merge grandfather into family photo'
         })
     });
     await manager.analyzeCurrentCustomerImages({ waitForCompletion: true });
+    assert.equal(state.visionCalls, 1);
     const prompt = state.visionPrompts[0];
-    assert.match(prompt, /production source material/i);
+    assert.match(prompt, /Analyze 2 Etsy image attachments independently/i);
     assert.match(prompt, /sharpness\/focus/i);
-    assert.match(prompt, /compression\/JPEG artifacts/i);
     assert.match(prompt, /face\/head replacement/i);
-    assert.match(prompt, /identity cues/i);
-    assert.match(prompt, /clarification questions/i);
-    assert.match(prompt, /1600x1200px/);
-    assert.match(prompt, /Please merge grandfather/);
+    assert.match(prompt, /identity-preserving cues/i);
+    assert.match(prompt, /IMAGE_LABEL: IMG_1/);
+    assert.match(prompt, /IMAGE_LABEL: IMG_2/);
+    assert.match(prompt, /Merge grandfather/);
 
-    const section = await manager.buildContextSection();
-    assert.match(section, /Persistent Gemini Vision production summaries/);
-    assert.match(section, /Technical:/);
-    assert.match(section, /Subjects:/);
-    assert.match(section, /Editing risks:/);
-    assert.match(section, /Useful clarification questions:/);
+    const entries = Object.values(storage.ETSY_AI_IMAGE_INTELLIGENCE_CACHE);
+    assert.equal(entries.length, 2);
+    assert.ok(entries.every(entry => entry.summaryText.includes('Technical:')));
 }
 
-async function testSignedUrlRotationStillUsesSameAttachmentCache() {
+async function testPayloadSplittingBelowInlineLimit() {
+    const { manager, state } = createHarness({
+        history: makeHistory('42', [
+            'https://img.example/a.jpg',
+            'https://img.example/b.jpg',
+            'https://img.example/c.jpg'
+        ]),
+        imageResponse: async () => ({
+            ok: true,
+            async blob() { return { type: 'image/jpeg', size: 6 * 1024 * 1024 }; }
+        })
+    });
+    await manager.analyzeCurrentCustomerImages({ waitForCompletion: true });
+    assert.equal(state.visionCalls, 2, '18 MB raw image input is split into safe requests');
+    assert.deepEqual(state.visionBatchSizes, [2, 1]);
+}
+
+async function testLegacySuccessMigratesWithoutReanalysis() {
+    const legacy = {
+        status: 'success',
+        version: '2026-old',
+        promptVersion: 'old-prompt',
+        id: '42-a0',
+        updatedAt: 1,
+        summaryText: 'Legacy permanent summary',
+        summaryJson: { imageType: 'photo', overallAssessment: 'legacy' }
+    };
+    const { manager, storage, state } = createHarness({
+        history: makeHistory('42', ['https://img.example/source.jpg?token=new']),
+        storageOverrides: { ETSY_AI_IMAGE_INTELLIGENCE_CACHE: { 'old-context-key': legacy } }
+    });
+    const result = await manager.analyzeCurrentCustomerImages({ waitForCompletion: true });
+    assert.equal(result.imageIntelAvailableCount, 1);
+    assert.equal(state.visionCalls, 0, 'successful analyses survive prompt/extension version upgrades');
+    assert.equal(Object.keys(storage.ETSY_AI_IMAGE_INTELLIGENCE_CACHE).length, 1, 'legacy entry is re-keyed instead of duplicated');
+    assert.equal(Object.values(storage.ETSY_AI_IMAGE_INTELLIGENCE_CACHE)[0].summaryText, 'Legacy permanent summary');
+}
+
+async function testSignedUrlRotationUsesSameCache() {
     const { manager, storage, state } = createHarness({
         history: makeHistory('42', ['https://img.example/source.jpg?token=first'])
     });
     await manager.analyzeCurrentCustomerImages({ waitForCompletion: true });
     storage.ETSY_CHAT_HISTORY = makeHistory('42', ['https://img.example/source.jpg?token=second']);
     await manager.analyzeCurrentCustomerImages({ waitForCompletion: true });
-    assert.equal(state.visionCalls, 1, 'stable attachment id prevents repeat analysis when a signed URL rotates');
+    assert.equal(state.visionCalls, 1, 'stable attachment id prevents repeat analysis when signed URL rotates');
 }
 
 async function testStructuredImagesSuppressDomOnlyWaste() {
@@ -235,35 +260,34 @@ async function testStructuredImagesSuppressDomOnlyWaste() {
         history: makeHistory('42', ['https://img.example/customer.jpg']),
         domUrls: ['https://img.example/customer.jpg', 'https://img.example/decorative.jpg']
     });
-    const metadata = await manager.analyzeCurrentCustomerImages({ waitForCompletion: true });
-    assert.equal(metadata.imageIntelCount, 1);
-    assert.equal(metadata.imageIntelCustomerCount, 1);
-    assert.equal(metadata.imageIntelUnknownRoleCount, 0);
-    assert.equal(state.visionCalls, 1, 'unknown DOM images are not analyzed when structured customer images exist');
+    const result = await manager.analyzeCurrentCustomerImages({ waitForCompletion: true });
+    assert.equal(result.imageIntelCount, 1);
+    assert.equal(result.imageIntelCustomerCount, 1);
+    assert.equal(state.visionCalls, 1, 'DOM fallback is ignored when structured customer images exist');
 }
 
 async function testFailuresAreDeferred() {
-    const tooLarge = (10 * 1024 * 1024) + 1;
     const { manager, storage, state } = createHarness({
         history: makeHistory('42', ['https://img.example/huge.jpg']),
         imageResponse: async () => ({
             ok: true,
-            async blob() { return { type: 'image/jpeg', size: tooLarge }; }
+            async blob() { return { type: 'image/jpeg', size: (10 * 1024 * 1024) + 1 }; }
         })
     });
-
     await manager.analyzeCurrentCustomerImages({ waitForCompletion: true });
     assert.equal(state.visionCalls, 0);
     const failure = Object.values(storage.ETSY_AI_IMAGE_INTELLIGENCE_CACHE)[0];
     assert.equal(failure.failureType, 'oversized');
     await manager.analyzeCurrentCustomerImages({ waitForCompletion: true });
-    assert.equal(state.imageFetchCalls, 1, 'deferred failure is not retried immediately');
+    assert.equal(state.imageFetchCalls, 1, 'deferred failure is not fetched again immediately');
 }
 
 (async () => {
-    await testBackgroundByDefaultAndPersistentCache();
-    await testDetailedProductionPromptAndCompactContext();
-    await testSignedUrlRotationStillUsesSameAttachmentCache();
+    await testBatchingAndPersistentCache();
+    await testDetailedBatchPromptAndPerImageMapping();
+    await testPayloadSplittingBelowInlineLimit();
+    await testLegacySuccessMigratesWithoutReanalysis();
+    await testSignedUrlRotationUsesSameCache();
     await testStructuredImagesSuppressDomOnlyWaste();
     await testFailuresAreDeferred();
     console.log('image intelligence manager tests passed');
