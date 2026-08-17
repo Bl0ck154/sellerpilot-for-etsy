@@ -8,6 +8,7 @@ let bootstrapCalls = 0;
 let refreshCalls = 0;
 let auxiliaryCalls = 0;
 const imageCalls = [];
+const imageWaitOrder = [];
 const summaryCalls = [];
 
 const window = {
@@ -27,7 +28,12 @@ const window = {
     ImageIntelligenceManager: {
         async analyzeCurrentCustomerImages(options) {
             imageCalls.push(options);
+            imageWaitOrder.push('enqueue');
             return options;
+        },
+        async waitForCurrentAnalysis(maxWaitMs) {
+            imageWaitOrder.push(`wait:${maxWaitMs}`);
+            return { imageIntelAvailableCount: 1 };
         }
     }
 };
@@ -81,6 +87,12 @@ vm.runInContext(source, context);
     });
     assert.equal(imageCalls[1].onStatus, onStatus, 'explicit foreground diagnostics can opt in to progress');
     assert.equal(imageCalls[1].waitForCompletion, true);
+
+    imageWaitOrder.length = 0;
+    await window.ImageIntelligenceManager.waitForCurrentAnalysis(1000);
+    assert.deepEqual(imageWaitOrder, ['enqueue', 'wait:1000'], 'bounded wait first awaits only the cheap enqueue phase, then waits on registered jobs');
+    assert.equal(imageCalls[2].waitForCompletion, false);
+    assert.equal(imageCalls[2].onStatus, undefined);
 
     context.location.pathname = '/listing/9';
     window.ShopIntelligenceManager.maybeBootstrap('listing');
