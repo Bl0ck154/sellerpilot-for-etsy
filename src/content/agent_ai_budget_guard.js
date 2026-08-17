@@ -57,16 +57,10 @@
             return originalAnalyzeImages({ ...options, onStatus: undefined, waitForCompletion: false });
         };
 
-        if (typeof imageManager.waitForCurrentAnalysis === 'function') {
-            const originalWaitForCurrentAnalysis = imageManager.waitForCurrentAnalysis.bind(imageManager);
-            imageManager.waitForCurrentAnalysis = async function (maxWaitMs = 1000) {
-                // Wait only for the cheap enqueue/storage phase first. This closes the race
-                // where waitForCurrentAnalysis checked imageJobs before async cache reads had
-                // registered the background jobs, while still never awaiting the heavy Vision work here.
-                await imageManager.analyzeCurrentCustomerImages({ waitForCompletion: false });
-                return originalWaitForCurrentAnalysis(maxWaitMs);
-            };
-        }
+        // Do not pre-call analyze here. ImageIntelligenceManager.waitForCurrentAnalysis()
+        // already owns the cheap enqueue phase before it performs the bounded wait.
+        // Calling analyzeCurrentCustomerImages() again here creates a redundant pass and
+        // can race the manager's own queue registration.
 
         imageManager.__etsyBackgroundSilent = true;
     }
@@ -85,7 +79,7 @@
                             content: {
                                 parts: [{ text: '{"observations":[],"uncertainties":[]}' }]
                             }
-                        }]
+                        }] 
                     },
                     skippedByBudgetGuard: true
                 };
