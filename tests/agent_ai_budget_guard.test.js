@@ -8,11 +8,18 @@ let bootstrapCalls = 0;
 let refreshCalls = 0;
 let auxiliaryCalls = 0;
 const imageCalls = [];
+const summaryCalls = [];
 
 const window = {
     ShopIntelligenceManager: {
         maybeBootstrap() { bootstrapCalls += 1; return true; },
         async refresh() { refreshCalls += 1; return true; }
+    },
+    ConversationContextManager: {
+        async getOrCreateSummary(chatHistory, omittedMessages, options = {}) {
+            summaryCalls.push({ chatHistory, omittedMessages, options });
+            return options.maxWaitMs === 0 ? '' : 'ready summary';
+        }
     },
     GeminiAuxiliaryService: {
         async generateContent() { auxiliaryCalls += 1; return { data: {} }; }
@@ -37,6 +44,21 @@ vm.runInContext(source, context);
 (async () => {
     assert.equal(window.ShopIntelligenceManager.maybeBootstrap('conversation_loaded'), false);
     assert.equal(await window.ShopIntelligenceManager.refresh('conversation_loaded'), false);
+
+    const summary = await window.ConversationContextManager.getOrCreateSummary(
+        { convo_id: '123' },
+        [{ sourceIndex: 50, message: { message_body: 'middle detail' } }]
+    );
+    assert.equal(summary, '');
+    assert.equal(summaryCalls[0].options.maxWaitMs, 0, 'long-thread semantic compression is background-first on message pages');
+
+    const explicitWait = await window.ConversationContextManager.getOrCreateSummary(
+        { convo_id: '123' },
+        [{ sourceIndex: 50, message: { message_body: 'middle detail' } }],
+        { maxWaitMs: 25 }
+    );
+    assert.equal(explicitWait, 'ready summary');
+    assert.equal(summaryCalls[1].options.maxWaitMs, 25, 'explicit diagnostics/tests can still opt into a bounded wait');
 
     const skipped = await window.GeminiAuxiliaryService.generateContent({
         body: {
@@ -63,6 +85,13 @@ vm.runInContext(source, context);
     context.location.pathname = '/listing/9';
     window.ShopIntelligenceManager.maybeBootstrap('listing');
     await window.ShopIntelligenceManager.refresh('listing');
+    const listingSummary = await window.ConversationContextManager.getOrCreateSummary(
+        { convo_id: 'other' },
+        [{ sourceIndex: 1, message: { message_body: 'detail' } }]
+    );
+    assert.equal(listingSummary, 'ready summary');
+    assert.equal(summaryCalls[2].options.maxWaitMs, undefined, 'non-message pages retain the original summary behavior');
+
     await window.GeminiAuxiliaryService.generateContent({
         body: {
             contents: [{ parts: [{ text: 'Create a compact evidence map for an Etsy assistant.' }] }]
