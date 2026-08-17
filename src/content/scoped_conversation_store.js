@@ -2,13 +2,14 @@
 window.ScopedConversationStore = (function () {
     'use strict';
     const PREFIX='ETSY_AI_CONVO_SCOPE_';
+    // Legacy global keys are kept only as a compatibility mirror while scoped keys are canonical.
     const LEGACY={history:'ETSY_CHAT_HISTORY',listingId:'ETSY_CURRENT_LISTING_ID',listingScope:'ETSY_CURRENT_LISTING_SCOPE',facts:'ETSY_AI_ACTIVE_CONTEXT_FACTS'};
     const id=v=>v===null||v===undefined?'':String(v).trim();
     const currentConversationId=()=>{try{return location.pathname.match(/^\/messages\/(\d+)/)?.[1]||null;}catch(_){return null;}};
     const keys=convoId=>{const c=id(convoId);return{history:`${PREFIX}${c}_HISTORY`,listing:`${PREFIX}${c}_LISTING`,facts:`${PREFIX}${c}_FACTS`};};
     async function get(k){if(!chrome?.runtime?.id)return{};try{return await chrome.storage.local.get(k);}catch(e){console.warn('ScopedConversationStore: read failed',e);return{};}}
     async function set(v){if(!chrome?.runtime?.id)return false;try{await chrome.storage.local.set(v);return true;}catch(e){console.warn('ScopedConversationStore: write failed',e);return false;}}
-    async function remove(k){if(!chrome?.runtime?.id)return false;try{await chrome.storage.local.remove(k);return true;}catch(e){console.warn('ScopedConversationStore: remove failed',e);return false;}}
+    async function remove(k){if(!chrome?.runtime?.id)return false;try{await chrome.storage.local.remove(k);}catch(e){console.warn('ScopedConversationStore: remove failed',e);return false;}return true;}
 
     async function getHistory(convoId=currentConversationId()){
         const c=id(convoId);if(!c)return null;const key=keys(c).history,s=await get([key,LEGACY.history]),scoped=s[key];
