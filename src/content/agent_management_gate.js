@@ -38,6 +38,7 @@
         return normalized(value)
             .replace(/^[\s:,.\-–—]+/, '')
             .replace(/^(?:that|this|що|шо|что)\s+/i, '')
+            .replace(/^(?:for\s+future(?:\s+replies)?|на\s+майбутнє|на\s+будущее)\s*[:,-]?\s*/iu, '')
             .trim();
     }
 
@@ -53,6 +54,7 @@
 
         const rememberPatterns = [
             /^(?:please\s+)?remember\b([\s\S]*)$/i,
+            /^(?:(?:can|could|would)\s+you\s+remember)\b([\s\S]*)$/i,
             /^(?:please\s+)?(?:save|store)\s+(?:this\s+)?(?:to|in)\s+(?:your\s+)?memory\b([\s\S]*)$/i,
             /^(?:запам['']?ятай|запамятай)\b([\s\S]*)$/iu,
             /^(?:збережи|додай)\s+(?:це\s+)?(?:в|до)\s+пам['']?ят(?:ь|і)\b([\s\S]*)$/iu,
