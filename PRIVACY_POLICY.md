@@ -10,7 +10,7 @@ The extension does not require a developer-operated backend for its AI features.
 
 ## Data stored in the browser
 
-Depending on the features you use, the extension may store the following in browser extension storage:
+Depending on the features you use, the extension may store:
 
 - AI provider API keys and provider settings
 - Custom provider URL and model selection
@@ -19,22 +19,28 @@ Depending on the features you use, the extension may store the following in brow
 - Quick replies and UI preferences
 - Cached Etsy page, listing, and conversation context
 - Derived AI summaries and diagnostic metadata
+- Per-image technical/visual analysis generated for Etsy conversation attachments
+
+Image-intelligence results are stored as derived text/JSON records keyed to the relevant conversation image. Successful derived analyses do not use an automatic time-to-live and may remain in local extension storage until extension data is cleared or the extension is uninstalled. Raw image bytes are **not** stored in the persistent image-intelligence cache.
 
 These values are stored locally in the browser profile using extension storage APIs. The extension does **not** implement an additional encryption layer for API keys or other stored values. Anyone with sufficient access to your browser profile or device may therefore be able to access local extension data.
 
 ## Data sent to AI providers
 
-AI features need context to produce useful results. Depending on the action and configuration, a request may include:
+Depending on the action and configuration, an AI request may include:
 
 - Your prompt or instruction
 - Etsy page title, URL, and extracted page text
 - Listing information
 - Etsy conversation text and relevant message context
-- Customer-side image attachments or image-derived context for image-aware workflows
+- Image attachments from the active Etsy conversation, including customer- or seller/Owner-side images when present, for image-aware workflows
+- Image-derived technical/visual context from previously analyzed attachments
 - Saved agent memory, quick-reply context, and additional instructions when relevant
 - Previous assistant conversation context
 
-The request is sent to the provider used for that operation. The extension supports Google Gemini as its default provider and contains integrations for optional provider/fallback paths such as DeepSeek, xAI/Grok, OpenRouter, and a user-configured OpenAI-compatible endpoint.
+For image intelligence, raw image bytes are sent to the configured Gemini image-analysis path when a new attachment requires analysis. Multiple new images from the same active conversation may be sent together in one multimodal request. The resulting derived analysis is cached locally so the same scoped image normally does not need to be sent for repeated analysis.
+
+The request is sent to the provider used for that operation. The extension supports Google Gemini as its default provider and contains optional integrations/fallback paths such as DeepSeek, xAI/Grok, OpenRouter, and a user-configured OpenAI-compatible endpoint.
 
 If you configure a custom endpoint, relevant request data is sent to that endpoint. Review and trust that service before enabling it.
 
@@ -48,7 +54,7 @@ The extension may fetch the public agent behavior policy from this GitHub reposi
 
 The extension runs on Etsy pages so it can provide page-aware assistance. It may read content that is visible or available to the signed-in Etsy session as required by enabled features.
 
-The extension can also request optional network access for a custom AI provider. Because the custom hostname is selected by the user at runtime, the manifest includes broad optional HTTPS host permission. The extension requests the relevant host permission when a custom provider is configured; this is separate from its normal Etsy host access.
+The extension can also request optional network access for a custom AI provider. Because the custom hostname is selected by the user at runtime, the manifest includes broad optional HTTPS host permission. The extension requests the relevant host permission when a custom provider is configured; this is separate from normal Etsy host access.
 
 ## Downloads
 
@@ -63,7 +69,7 @@ You can reduce or remove locally stored data by:
 - clearing the extension's browser storage; or
 - uninstalling the extension.
 
-Uninstall behavior and browser-profile cleanup are ultimately controlled by the browser.
+Clearing extension browser storage also removes persistent derived image-analysis records. Uninstall behavior and browser-profile cleanup are ultimately controlled by the browser.
 
 ## Security recommendations
 
