@@ -26,6 +26,7 @@
             imageIntelCoverage: 0,
             imageIntelAnalyzedThisRequest: 0,
             imageIntelQueuedThisRequest: 0,
+            imageIntelBatchCallsThisRequest: 0,
             imageIntelErrors: []
         };
     }
