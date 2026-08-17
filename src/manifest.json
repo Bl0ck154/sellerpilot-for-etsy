@@ -36,6 +36,7 @@
                 "content/inject_interceptor.js",
                 "config/base_instruction.js",
                 "content/config.js",
+                "content/etsy_compatibility.js",
                 "libs/Readability.min.js",
                 "libs/turndown.js",
                 "content/page_parser.js",
@@ -82,6 +83,7 @@
                 "content/chat_ui.css",
                 "content/ui.html",
                 "config/agent_policy.json",
+                "config/etsy_compatibility.json",
                 "config/base_instruction.js",
                 "content/page_interceptor.js"
             ],
