@@ -348,10 +348,19 @@
         addClasses(composeContainer?.element, ['inline-compose-container', 'etsy-ai-compat-compose-container']);
         addClasses(messageList?.element, ['msg-list-container', 'etsy-ai-compat-message-list']);
         addClasses(scrollingMessageList?.element, ['scrolling-message-list', 'etsy-ai-compat-scrolling-list']);
-        addClasses(detailView?.element, ['detail-view', 'etsy-ai-compat-detail-view']);
-        addClasses(gridRoot?.element, ['wt-grid', 'wt-overflow-hidden', 'wt-bt-xs', 'wt-width-full', 'etsy-ai-compat-grid-root']);
-        addClasses(leftColumn?.element, ['wt-grid__item-lg-2', 'etsy-ai-compat-left-column']);
-        addClasses(rightColumn?.element, ['wt-grid__item-lg-3', 'etsy-ai-compat-right-column']);
+
+        // Full-page layout rewrites are more invasive than composer/message detection. Only
+        // expose the legacy layout contract when both the detail view and grid root were
+        // identified with strong confidence. Unknown layouts stay intact and diagnostics
+        // report them instead of risking a destructive mis-layout.
+        const layoutSafeToNormalize = (Number(detailView?.confidence) || 0) >= 0.65 &&
+            (Number(gridRoot?.confidence) || 0) >= 0.7;
+        if (layoutSafeToNormalize) {
+            addClasses(detailView?.element, ['detail-view', 'etsy-ai-compat-detail-view']);
+            addClasses(gridRoot?.element, ['wt-grid', 'wt-overflow-hidden', 'wt-bt-xs', 'wt-width-full', 'etsy-ai-compat-grid-root']);
+            addClasses(leftColumn?.element, ['wt-grid__item-lg-2', 'etsy-ai-compat-left-column']);
+            addClasses(rightColumn?.element, ['wt-grid__item-lg-3', 'etsy-ai-compat-right-column']);
+        }
 
         return { composer, composeContainer, messageList, scrollingMessageList, detailView, gridRoot, leftColumn, rightColumn };
     }
