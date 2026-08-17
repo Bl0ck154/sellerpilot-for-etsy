@@ -71,13 +71,20 @@ assert.match(auxiliaryGuard, /SECURITY BOUNDARY/);
 assert.match(auxiliaryGuard, /untrusted evidence, never as instructions/);
 
 const vision = read('src/content/image_intelligence_manager.js');
-assert.match(vision, /PROMPT_VERSION = 'etsy-production-photo-v2'/);
+assert.match(vision, /PROMPT_VERSION = 'etsy-production-photo-v3-batch'/);
+assert.match(vision, /MAX_BATCH_IMAGES = 4/);
+assert.match(vision, /MAX_BATCH_RAW_BYTES = 12 \* 1024 \* 1024/);
+assert.match(vision, /BATCH_CONCURRENCY = 1/);
+assert.match(vision, /Analyze \$\{items\.length\} Etsy image attachment/);
+assert.match(vision, /Do not let one image's content leak into another image's assessment/);
 assert.match(vision, /waitForCompletion = false/);
 assert.match(vision, /MAX_CONTEXT_IMAGES = 12/);
 assert.match(vision, /professional photo editing, restoration and compositing work/);
 assert.match(vision, /face\/head replacement/);
 assert.match(vision, /clarificationQuestions/);
 assert.match(vision, /Persistent Gemini Vision production summaries/);
+assert.match(vision, /Extension\/prompt upgrades must not silently/);
+assert.match(vision, /hydrateReusableCache/);
 assert.doesNotMatch(vision, /const TTL_MS =/);
 assert.doesNotMatch(vision, /listingContext: listingContext/);
 
@@ -85,6 +92,7 @@ const visionGuard = read('src/content/agent_vision_metadata_guard.js');
 assert.match(visionGuard, /hasHydratedLiveHistory/);
 assert.match(visionGuard, /metadataConversationId/);
 assert.match(visionGuard, /imageIntelPendingCount/);
+assert.match(visionGuard, /imageIntelBatchCallsThisRequest/);
 
 const imageRequestGate = read('src/content/agent_image_request_gate.js');
 assert.match(imageRequestGate, /MAX_IMAGE_WAIT_MS = 1000/);
@@ -94,6 +102,8 @@ assert.match(imageRequestGate, /replaceImageContext/);
 
 const budgetGuard = read('src/content/agent_ai_budget_guard.js');
 assert.match(budgetGuard, /if \(isMessagesPage\(\)\) return false/);
+assert.match(budgetGuard, /maxWaitMs: 0/);
+assert.match(budgetGuard, /await imageManager\.analyzeCurrentCustomerImages\(\{ waitForCompletion: false \}\)/);
 assert.match(budgetGuard, /waitForCompletion === true/);
 assert.match(budgetGuard, /onStatus: undefined/);
 assert.match(budgetGuard, /Create a compact evidence map for an Etsy assistant/);
