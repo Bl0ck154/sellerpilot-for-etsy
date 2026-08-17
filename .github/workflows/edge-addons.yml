@@ -27,6 +27,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Run Node regression tests
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $tests = Get-ChildItem -Path "tests" -Filter "*.test.js" | Sort-Object Name
+          foreach ($test in $tests) {
+            Write-Host "Running $($test.Name)"
+            & node $test.FullName
+            if ($LASTEXITCODE -ne 0) {
+              throw "Test failed: $($test.Name)"
+            }
+          }
+
       - name: Build Chromium package
         shell: cmd
         run: build.bat
