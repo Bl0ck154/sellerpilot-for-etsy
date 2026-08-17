@@ -24,15 +24,11 @@
         "http://localhost/*",
         "http://127.0.0.1/*"
     ],
-    "background": {
-        "service_worker": "background/service_worker.js"
-    },
+    "background": { "service_worker": "background/service_worker.js" },
     "options_page": "options/options.html",
     "content_scripts": [
         {
-            "matches": [
-                "https://www.etsy.com/*"
-            ],
+            "matches": ["https://www.etsy.com/*"],
             "js": [
                 "content/inject_interceptor.js",
                 "config/base_instruction.js",
@@ -40,6 +36,7 @@
                 "libs/Readability.min.js",
                 "libs/turndown.js",
                 "content/page_parser.js",
+                "content/scoped_conversation_store.js",
                 "content/agent_policy_manager.js",
                 "content/gemini_auxiliary_service.js",
                 "content/agent_auxiliary_prompt_guard.js",
@@ -54,6 +51,7 @@
                 "content/quick_reply_manager.js",
                 "content/quick_reply_ui.js",
                 "content/base_ai_service.js",
+                "content/agent_scoped_context_bridge.js",
                 "content/agent_context_manager.js",
                 "content/providers/gemini_service.js",
                 "content/providers/deepseek_service.js",
@@ -72,10 +70,7 @@
                 "content/chat_ui.js",
                 "content/chat_submission_guard.js"
             ],
-            "css": [
-                "content/chat_ui.css",
-                "content/image_modal.css"
-            ],
+            "css": ["content/chat_ui.css", "content/image_modal.css"],
             "run_at": "document_idle"
         }
     ],
@@ -88,9 +83,7 @@
                 "config/base_instruction.js",
                 "content/page_interceptor.js"
             ],
-            "matches": [
-                "https://www.etsy.com/*"
-            ]
+            "matches": ["https://www.etsy.com/*"]
         }
     ]
 }
