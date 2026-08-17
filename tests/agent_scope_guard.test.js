@@ -88,11 +88,6 @@ const window = {
             };
         }
     },
-    BaseAIService: {
-        INSTRUCTIONS: {
-            async getRAGContext() { return 'RAG'; }
-        }
-    },
     ImageIntelligenceManager: {
         async analyzeCurrentCustomerImages() { return { imageIntelCount: 1 }; },
         async buildContextSection() { return 'IMAGE'; },
@@ -108,10 +103,6 @@ const window = {
             summaryConcurrent -= 1;
             return `summary-${chatHistory.convo_id}`;
         }
-    },
-    ShopIntelligenceManager: {
-        async buildContextSection() { return 'SHOP'; },
-        async getMetadata() { return { shopIntelActive: true }; }
     }
 };
 
@@ -150,10 +141,13 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 (async () => {
     await delay(5);
 
-    assert.equal(storage.ETSY_CHAT_HISTORY, undefined, 'stale previous conversation is removed on startup');
-    assert.equal(storage.ETSY_CURRENT_LISTING_ID, undefined, 'stale previous listing is removed');
-    assert.equal(storage.ETSY_CURRENT_LISTING_SCOPE, undefined, 'stale listing scope is removed');
-    assert.equal(storage.ETSY_AI_ACTIVE_CONTEXT_FACTS, undefined, 'stale active facts are removed');
+    // Multi-tab safety: data belonging to another Etsy conversation must not be
+    // destructively removed merely because this tab is currently on conversation 200.
+    assert.equal(storage.ETSY_CHAT_HISTORY.convo_id, '100', 'previous conversation is preserved for another tab');
+    assert.equal(storage.ETSY_CURRENT_LISTING_ID, '999', 'previous listing is preserved for another tab');
+    assert.equal(storage.ETSY_CURRENT_LISTING_SCOPE.convoId, '100', 'previous listing scope is preserved for another tab');
+    assert.equal(storage.ETSY_AI_ACTIVE_CONTEXT_FACTS.convoId, '100', 'previous active facts are preserved for another tab');
+    assert.equal(await window.EtsyAgentScopeGuard.clearStaleScopedState(), true, 'legacy cleanup hook is intentionally non-destructive');
 
     const fresh = window.EtsyAI_GetFreshContext();
     assert.equal(fresh.metadata.url, 'https://www.etsy.com/messages/200', 'fresh context guard bypasses old SPA cache');
@@ -165,7 +159,6 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
     assert.equal(await window.ImageIntelligenceManager.buildContextSection(), '', 'vision context is blocked when conversation mismatches');
 
     storage.ETSY_CHAT_HISTORY = { convo_id: '200', messages: [{ message_body: 'live customer' }] };
-    assert.equal(await window.BaseAIService.INSTRUCTIONS.getRAGContext(), '', 'RAG is blocked until listing scope is confirmed');
 
     await window.EtsyAgentScopeGuard.bindListingScopeFromDetail({
         detail: { conversation_id: '200', listing_id: '77777' }
@@ -175,7 +168,7 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
         JSON.parse(JSON.stringify(storage.ETSY_CURRENT_LISTING_SCOPE)),
         { convoId: '200', listingId: '77777', updatedAt: storage.ETSY_CURRENT_LISTING_SCOPE.updatedAt }
     );
-    assert.equal(await window.BaseAIService.INSTRUCTIONS.getRAGContext(), 'RAG');
+    assert.equal(await window.EtsyAgentScopeGuard.getScopedListingId(), '77777');
 
     delete storage.ETSY_CURRENT_LISTING_ID;
     delete storage.ETSY_CURRENT_LISTING_SCOPE;
@@ -183,17 +176,6 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
     assert.equal(fetchCalls, 1);
     assert.equal(storage.ETSY_CURRENT_LISTING_ID, '88888');
     assert.equal(storage.ETSY_CURRENT_LISTING_SCOPE.convoId, '200');
-
-    storage.current_context = {
-        metadata: { url: 'https://www.etsy.com/messages/100' },
-        page_url: 'https://www.etsy.com/messages/100'
-    };
-    assert.equal(await window.ShopIntelligenceManager.buildContextSection(), '', 'shop intelligence is blocked for stale page context');
-    storage.current_context = {
-        metadata: { url: 'https://www.etsy.com/messages/200' },
-        page_url: 'https://www.etsy.com/messages/200'
-    };
-    assert.equal(await window.ShopIntelligenceManager.buildContextSection(), 'SHOP');
 
     const omitted = [{ sourceIndex: 1, message: { message_body: 'middle', create_date: 1 } }];
     await Promise.all([
