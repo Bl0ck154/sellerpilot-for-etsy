@@ -198,6 +198,7 @@ Before contributing:
 
 | Document | Purpose |
 | --- | --- |
+| [CHANGELOG.md](./CHANGELOG.md) | Source-level release history |
 | [ARCHITECTURE.md](./ARCHITECTURE.md) | Components, data flow, trust boundaries |
 | [BUILD_INSTRUCTIONS.md](./BUILD_INSTRUCTIONS.md) | Local Chrome/Edge/Firefox build process |
 | [PRIVACY_POLICY.md](./PRIVACY_POLICY.md) | Data collection, storage, and provider disclosure |
