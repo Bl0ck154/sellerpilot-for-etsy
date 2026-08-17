@@ -22,8 +22,10 @@
             imageIntelFailedCount: 0,
             imageIntelOversizedCount: 0,
             imageIntelDeferredCount: 0,
+            imageIntelPendingCount: 0,
             imageIntelCoverage: 0,
             imageIntelAnalyzedThisRequest: 0,
+            imageIntelQueuedThisRequest: 0,
             imageIntelErrors: []
         };
     }
