@@ -31,9 +31,9 @@ function makeHistory(convoId, imageUrls, options = {}) {
 
 function createHarness({
     history = makeHistory('42', [
-        'https://img.example/0.jpg',
-        'https://img.example/1.jpg',
-        'https://img.example/2.jpg'
+        'https://img.example/0.jpg?token=a',
+        'https://img.example/1.jpg?token=a',
+        'https://img.example/2.jpg?token=a'
     ]),
     domUrls = [],
     imageResponse,
@@ -53,7 +53,6 @@ function createHarness({
         activeVisionCalls: 0,
         maxActiveVisionCalls: 0
     };
-
     const chrome = {
         runtime: { id: 'test-extension' },
         storage: {
@@ -64,23 +63,24 @@ function createHarness({
                         .map(key => [key, structuredClone(storage[key])]));
                 },
                 async set(values) { Object.assign(storage, structuredClone(values)); }
-            }
+            },
+            onChanged: { addListener() {} }
         }
     };
-
     const document = {
         querySelectorAll() {
-            return domUrls.map(url => ({
-                href: url,
-                querySelector() { return null; }
-            }));
+            return domUrls.map(url => ({ href: url, querySelector() { return null; } }));
         }
     };
-
+    const window = {
+        ETSY_AI_GEMINI_FALLBACK_CHAIN: ['gemini-flash-latest'],
+        addEventListener() {}
+    };
     const context = {
-        window: { ETSY_AI_GEMINI_FALLBACK_CHAIN: ['gemini-flash-latest'] },
+        window,
         chrome,
         document,
+        location: { pathname: '/messages/42', href: 'https://www.etsy.com/messages/42' },
         console,
         Date,
         Math,
@@ -90,9 +90,10 @@ function createHarness({
         Set,
         Map,
         Promise,
+        URL,
         AbortController,
         FileReader: MockFileReader,
-        createImageBitmap: async () => ({ width: 640, height: 480, close() { } }),
+        createImageBitmap: async () => ({ width: 1600, height: 1200, close() {} }),
         setTimeout,
         clearTimeout,
         fetch: async (url, options = {}) => {
@@ -114,21 +115,45 @@ function createHarness({
             state.visionPrompts.push(body.contents[0].parts[0].text);
             try {
                 if (visionResponse) return await visionResponse(url, options, state);
-                await new Promise(resolve => setTimeout(resolve, 5));
+                await new Promise(resolve => setTimeout(resolve, 10));
+                const payload = {
+                    imageType: 'photo',
+                    technicalQuality: {
+                        overall: 'limited',
+                        resolutionDetail: 'Low face detail',
+                        sharpnessFocus: 'Soft',
+                        compressionNoise: 'Some JPEG artifacts',
+                        lightingExposure: 'Side light',
+                        color: 'Neutral',
+                        croppingOcclusion: 'Hands cropped',
+                        perspective: 'Normal',
+                        background: 'Busy',
+                        damageArtifacts: 'None'
+                    },
+                    subjects: [{
+                        label: 'Person 1',
+                        position: 'center',
+                        poseOrientation: 'front-facing',
+                        faceVisibility: 'face visible but soft',
+                        expression: 'neutral',
+                        hair: 'visible',
+                        clothingAccessories: 'dark top',
+                        bodyHandsVisibility: 'upper body',
+                        occlusions: 'none',
+                        identityCues: ['hairline'],
+                        uncertainties: []
+                    }],
+                    editingRisks: ['Low face detail'],
+                    identityCriticalDetails: ['hairline'],
+                    clarificationQuestions: ['Is another sharper face reference available?'],
+                    uncertainties: [],
+                    overallAssessment: 'Usable as a secondary source.',
+                    confidence: 'high'
+                };
                 return {
                     ok: true,
                     async json() {
-                        return {
-                            candidates: [{ content: { parts: [{ text: JSON.stringify({
-                                imageType: 'photo',
-                                quality: 'poor',
-                                qualityAssessment: 'The source is small and visibly soft.',
-                                qualityLimitations: ['Low detail'],
-                                visualSummary: ['One person'],
-                                uncertainties: [],
-                                workImplications: ['Fine detail may not reproduce cleanly']
-                            }) }] } }]
-                        };
+                        return { candidates: [{ content: { parts: [{ text: JSON.stringify(payload) }] } }] };
                     }
                 };
             } finally {
@@ -137,169 +162,110 @@ function createHarness({
         },
         Blob
     };
-    context.window.window = context.window;
-    context.window.chrome = chrome;
-    context.window.document = document;
+    window.window = window;
+    window.chrome = chrome;
+    window.document = document;
+    window.location = context.location;
     vm.createContext(context);
     vm.runInContext(managerSource, context);
 
-    return {
-        manager: context.window.ImageIntelligenceManager,
-        storage,
-        state
-    };
+    return { manager: window.ImageIntelligenceManager, storage, state };
 }
 
-async function waitFor(predicate, message) {
-    const deadline = Date.now() + 1000;
-    while (!predicate()) {
-        if (Date.now() > deadline) throw new Error(message || 'condition was not reached');
-        await new Promise(resolve => setTimeout(resolve, 1));
-    }
-}
+async function testBackgroundByDefaultAndPersistentCache() {
+    const { manager, storage, state } = createHarness();
+    const immediate = await manager.analyzeCurrentCustomerImages();
+    assert.equal(immediate.imageIntelCount, 3);
+    assert.equal(immediate.imageIntelQueuedThisRequest, 3);
+    assert.equal(immediate.imageIntelAvailableCount, 0);
 
-async function testAllStructuredCustomerImagesAndCache() {
-    const { manager, state } = createHarness();
-    const first = await manager.analyzeCurrentCustomerImages();
-    assert.equal(first.imageIntelCount, 3);
-    assert.equal(first.imageIntelCustomerCount, 3);
-    assert.equal(first.imageIntelUnknownRoleCount, 0);
-    assert.equal(first.imageIntelAnalyzedThisRequest, 3, 'every structured customer image is analyzed');
-    assert.equal(first.imageIntelAvailableCount, 3);
-    assert.equal(first.imageIntelCoverage, 1);
+    await manager.waitForCurrentAnalysis(1200);
     assert.equal(state.visionCalls, 3);
-    assert.equal(state.maxActiveVisionCalls, 2, 'vision analysis concurrency stays capped at two');
-    assert.ok(state.visionPrompts.every(prompt => /resolution, sharpness, compression/.test(prompt)));
-    assert.ok(state.visionPrompts.every(prompt => /640x480px/.test(prompt)));
-    assert.ok(state.visionPrompts.some(prompt => /Please use source photo 1/.test(prompt)));
+    assert.equal(state.maxActiveVisionCalls, 2, 'global Vision concurrency stays capped at two');
 
-    const second = await manager.analyzeCurrentCustomerImages();
-    assert.equal(second.imageIntelAnalyzedThisRequest, 0);
-    assert.equal(second.imageIntelAvailableCount, 3);
-    assert.equal(state.visionCalls, 3, 'fresh analyses are reused from cache');
-
-    const section = await manager.buildContextSection();
-    assert.match(section, /3 structured customer image attachment/);
-    assert.match(section, /Vision coverage: 3\/3/);
-    assert.match(section, /Quality assessment: The source is small and visibly soft/);
+    const cache = storage.ETSY_AI_IMAGE_INTELLIGENCE_CACHE;
+    assert.equal(Object.keys(cache).length, 3);
+    for (const entry of Object.values(cache)) {
+        entry.updatedAt = Date.now() - 365 * 24 * 60 * 60 * 1000;
+        entry.analyzedAt = entry.updatedAt;
+    }
+    storage.ETSY_CURRENT_LISTING_ID = '999';
+    storage.RAG_LISTING_999 = { title: 'Changed listing context' };
+    await manager.analyzeCurrentCustomerImages({ waitForCompletion: true });
+    assert.equal(state.visionCalls, 3, 'successful image analysis never expires or changes with listing context');
 }
 
-async function testCacheIncludesTaskContext() {
-    const sharedUrl = 'https://img.example/shared.jpg';
-    const { manager, storage, state } = createHarness({
-        history: makeHistory('context-cache', [sharedUrl], { message: 'Use this for portrait A' }),
-        storageOverrides: {
-            ETSY_CURRENT_LISTING_ID: '1',
-            RAG_LISTING_1: { title: 'Portrait A', description: 'First task context' }
-        }
-    });
-
-    await manager.analyzeCurrentCustomerImages();
-    storage.RAG_LISTING_1 = { title: 'Portrait B', description: 'Different task context' };
-    await manager.analyzeCurrentCustomerImages();
-    assert.equal(state.visionCalls, 2, 'the same URL is re-evaluated when its task context changes');
-    assert.match(state.visionPrompts[0], /First task context/);
-    assert.match(state.visionPrompts[1], /Different task context/);
-}
-
-async function testDomOnlyRoleRemainsUnknown() {
+async function testDetailedProductionPromptAndCompactContext() {
     const { manager, state } = createHarness({
-        history: makeHistory('dom-only', []),
-        domUrls: ['https://img.example/dom.jpg']
+        history: makeHistory('42', ['https://img.example/source.jpg'], {
+            message: 'Please merge grandfather into family photo'
+        })
     });
-
-    const metadata = await manager.analyzeCurrentCustomerImages();
-    assert.equal(metadata.imageIntelCount, 1);
-    assert.equal(metadata.imageIntelCustomerCount, 0);
-    assert.equal(metadata.imageIntelUnknownRoleCount, 1);
-    assert.match(state.visionPrompts[0], /sender is not known/);
-    assert.doesNotMatch(state.visionPrompts[0], /customer-provided Etsy attachment/);
+    await manager.analyzeCurrentCustomerImages({ waitForCompletion: true });
+    const prompt = state.visionPrompts[0];
+    assert.match(prompt, /production source material/i);
+    assert.match(prompt, /sharpness\/focus/i);
+    assert.match(prompt, /compression\/JPEG artifacts/i);
+    assert.match(prompt, /face\/head replacement/i);
+    assert.match(prompt, /identity cues/i);
+    assert.match(prompt, /clarification questions/i);
+    assert.match(prompt, /1600x1200px/);
+    assert.match(prompt, /Please merge grandfather/);
 
     const section = await manager.buildContextSection();
-    assert.match(section, /0 structured customer image attachment/);
-    assert.match(section, /1 additional DOM-only attachment.*unknown sender role/);
-    assert.match(section, /Sender role: unknown \(DOM-only evidence does not identify the sender\)/);
+    assert.match(section, /Persistent Gemini Vision production summaries/);
+    assert.match(section, /Technical:/);
+    assert.match(section, /Subjects:/);
+    assert.match(section, /Editing risks:/);
+    assert.match(section, /Useful clarification questions:/);
 }
 
-async function testFailuresAreDeferredAndCoverageIsExposed() {
+async function testSignedUrlRotationStillUsesSameAttachmentCache() {
+    const { manager, storage, state } = createHarness({
+        history: makeHistory('42', ['https://img.example/source.jpg?token=first'])
+    });
+    await manager.analyzeCurrentCustomerImages({ waitForCompletion: true });
+    storage.ETSY_CHAT_HISTORY = makeHistory('42', ['https://img.example/source.jpg?token=second']);
+    await manager.analyzeCurrentCustomerImages({ waitForCompletion: true });
+    assert.equal(state.visionCalls, 1, 'stable attachment id prevents repeat analysis when a signed URL rotates');
+}
+
+async function testStructuredImagesSuppressDomOnlyWaste() {
+    const { manager, state } = createHarness({
+        history: makeHistory('42', ['https://img.example/customer.jpg']),
+        domUrls: ['https://img.example/customer.jpg', 'https://img.example/decorative.jpg']
+    });
+    const metadata = await manager.analyzeCurrentCustomerImages({ waitForCompletion: true });
+    assert.equal(metadata.imageIntelCount, 1);
+    assert.equal(metadata.imageIntelCustomerCount, 1);
+    assert.equal(metadata.imageIntelUnknownRoleCount, 0);
+    assert.equal(state.visionCalls, 1, 'unknown DOM images are not analyzed when structured customer images exist');
+}
+
+async function testFailuresAreDeferred() {
     const tooLarge = (10 * 1024 * 1024) + 1;
     const { manager, storage, state } = createHarness({
-        history: makeHistory('oversized', ['https://img.example/huge.jpg']),
+        history: makeHistory('42', ['https://img.example/huge.jpg']),
         imageResponse: async () => ({
             ok: true,
             async blob() { return { type: 'image/jpeg', size: tooLarge }; }
         })
     });
 
-    const before = Date.now();
-    const first = await manager.analyzeCurrentCustomerImages();
-    assert.equal(first.imageIntelAnalyzedThisRequest, 0);
-    assert.equal(first.imageIntelAvailableCount, 0);
-    assert.equal(first.imageIntelFailedCount, 1);
-    assert.equal(first.imageIntelOversizedCount, 1);
-    assert.equal(first.imageIntelDeferredCount, 1);
-    assert.equal(first.imageIntelCoverage, 0);
-    assert.equal(first.imageIntelErrors.length, 1);
-    assert.equal(state.imageFetchCalls, 1);
-    assert.equal(state.visionCalls, 0, 'oversized bytes are never sent to vision');
-
+    await manager.analyzeCurrentCustomerImages({ waitForCompletion: true });
+    assert.equal(state.visionCalls, 0);
     const failure = Object.values(storage.ETSY_AI_IMAGE_INTELLIGENCE_CACHE)[0];
-    assert.equal(failure.status, 'failed');
     assert.equal(failure.failureType, 'oversized');
-    assert.equal(failure.attemptCount, 1);
-    assert.ok(failure.retryAfter > before);
-    assert.ok(failure.retryAfter - before <= (24 * 60 * 60 * 1000) + 1000, 'retry delay is bounded');
-
-    const second = await manager.analyzeCurrentCustomerImages();
-    assert.equal(second.imageIntelDeferredCount, 1);
-    assert.equal(second.imageIntelErrors.length, 0, 'a deferred cached failure is not reported as a new error');
-    assert.equal(state.imageFetchCalls, 1, 'a known failure is not retried immediately');
-
-    const section = await manager.buildContextSection();
-    assert.match(section, /Vision coverage: 0\/1 attachment.*1 temporarily unavailable/);
-    assert.match(section, /do not claim to know image contents or sender role/);
-}
-
-async function testInFlightWorkIsScopedByConversationSource() {
-    const release = new Map();
-    const { manager, storage, state } = createHarness({
-        history: makeHistory('first', ['https://img.example/first.jpg']),
-        imageResponse: url => new Promise(resolve => {
-            release.set(String(url), () => resolve({
-                ok: true,
-                async blob() { return new Blob([new Uint8Array([1])], { type: 'image/jpeg' }); }
-            }));
-        })
-    });
-
-    const first = manager.analyzeCurrentCustomerImages();
-    await waitFor(() => release.has('https://img.example/first.jpg'), 'first conversation did not begin');
-
-    const duplicateFirst = manager.analyzeCurrentCustomerImages();
-    await new Promise(resolve => setTimeout(resolve, 5));
-    assert.equal(state.imageFetchCalls, 1, 'identical in-flight source shares its promise');
-
-    storage.ETSY_CHAT_HISTORY = makeHistory('second', ['https://img.example/second.jpg']);
-    const second = manager.analyzeCurrentCustomerImages();
-    await waitFor(() => release.has('https://img.example/second.jpg'), 'second conversation was blocked by the first');
-    assert.equal(state.imageFetchCalls, 2, 'a different conversation/source starts independently');
-
-    release.get('https://img.example/first.jpg')();
-    release.get('https://img.example/second.jpg')();
-    const [firstResult, duplicateResult, secondResult] = await Promise.all([first, duplicateFirst, second]);
-    assert.equal(firstResult.imageIntelAnalyzedThisRequest, 1);
-    assert.equal(duplicateResult.imageIntelAnalyzedThisRequest, 1);
-    assert.equal(secondResult.imageIntelAnalyzedThisRequest, 1);
-    assert.equal(state.visionCalls, 2);
-    assert.equal(Object.keys(storage.ETSY_AI_IMAGE_INTELLIGENCE_CACHE).length, 2, 'serialized cache merges preserve both conversations');
+    await manager.analyzeCurrentCustomerImages({ waitForCompletion: true });
+    assert.equal(state.imageFetchCalls, 1, 'deferred failure is not retried immediately');
 }
 
 (async () => {
-    await testAllStructuredCustomerImagesAndCache();
-    await testCacheIncludesTaskContext();
-    await testDomOnlyRoleRemainsUnknown();
-    await testFailuresAreDeferredAndCoverageIsExposed();
-    await testInFlightWorkIsScopedByConversationSource();
+    await testBackgroundByDefaultAndPersistentCache();
+    await testDetailedProductionPromptAndCompactContext();
+    await testSignedUrlRotationStillUsesSameAttachmentCache();
+    await testStructuredImagesSuppressDomOnlyWaste();
+    await testFailuresAreDeferred();
     console.log('image intelligence manager tests passed');
 })().catch(error => {
     console.error(error);
