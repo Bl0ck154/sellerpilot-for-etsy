@@ -192,8 +192,8 @@ const instructions = context.window.BaseAIService.INSTRUCTIONS;
     assert.match(chatUiSource, /Use semantic intent, not keyword matching/);
     assert.match(
         read('src/content/etsy_context_interceptor.js'),
-        /Analyze every newly received customer image[\s\S]*?analyzeCurrentCustomerImages\(\)/,
-        'vision analysis starts from background conversation ingestion, not message submission'
+        /writeHistory[\s\S]*?scheduleBackgroundAnalysis\?\.\(0\)/,
+        'vision analysis is scheduled from background conversation ingestion, not message submission'
     );
     assert.doesNotMatch(chatUiSource, /shouldAnalyzeQuickReplyIntent|IMAGE_ANALYSIS_DECISION_SYSTEM_PROMPT|detectOverpromiseRisk/);
     const quickActionsSetup = chatUiSource.slice(
