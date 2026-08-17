@@ -2,16 +2,16 @@
 
 # SellerPilot for Etsy
 
-### A context-aware AI browser assistant for Etsy sellers
+### A context-aware AI browser assistant and better Messages workspace for Etsy sellers
 
 [![Version](https://img.shields.io/badge/version-1.6.26-2f80ed)](#)
 [![Manifest](https://img.shields.io/badge/Manifest-V3-4285F4)](#)
 [![Browsers](https://img.shields.io/badge/Chrome%20%7C%20Edge%20%7C%20Firefox-supported-4c1)](#)
 [![License](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
 
-**AI help where the work actually happens — inside Etsy pages, listings, and conversations.**
+**AI help where the work actually happens — plus an Etsy Messages layout that uses your screen properly.**
 
-[Features](#features) · [Install](#install-from-source) · [Privacy](#privacy) · [Architecture](#how-it-works) · [Contributing](#contributing)
+[Features](#features) · [Messages workspace](#better-etsy-messages-workspace) · [Install](#install-from-source) · [Privacy](#privacy) · [Architecture](#how-it-works) · [Contributing](#contributing)
 
 </div>
 
@@ -19,11 +19,25 @@
 
 ## What it does
 
-SellerPilot adds an AI assistant directly to Etsy seller workflows. Instead of working as a separate chatbot with no context, it can use the Etsy page you are currently viewing, listing information, conversation history, saved preferences, and supported customer images to produce more relevant answers and reply drafts.
+SellerPilot improves Etsy seller workflows in two ways: it adds a context-aware AI assistant directly to Etsy, and it turns the cramped Etsy Messages page into a much more practical full-height workspace. Instead of leaving most of the screen to static navigation, order chrome, blank space, and the footer, the enhanced layout lets the conversation use the available space and keeps the surrounding panels resizable.
+
+The AI assistant can use the Etsy page you are currently viewing, listing information, conversation history, saved preferences, and supported customer images to produce more relevant answers and reply drafts.
 
 The project is designed to stay **local-first**: extension state is stored in the browser, AI requests go directly to the provider configured by the user, and no developer-operated backend is required for normal AI requests.
 
 ## Features
+
+### Better Etsy Messages workspace
+
+- Full-height conversation workspace that removes the large unused footer/blank area from active chats
+- Conversation column expands to use the remaining screen instead of staying in a small fixed area
+- Resizable inbox/navigation and order-details panels with widths saved locally
+- Auto-expanding reply composer
+- Per-conversation draft persistence and sent-draft guards
+- Conversation attachment gallery in the details panel with click-to-preview images
+- SPA-aware behavior when moving between Etsy conversations without a full page reload
+- Compatibility safeguards that avoid invasive layout rewrites when a future Etsy layout cannot be identified confidently
+- **Standalone no-AI edition:** [`userscripts/etsy-messages-workspace.user.js`](./userscripts/etsy-messages-workspace.user.js) can be installed through Tampermonkey without installing the full extension
 
 ### Context-aware assistant
 
@@ -108,6 +122,14 @@ Read the full [Privacy Policy](./PRIVACY_POLICY.md) before using the extension w
 5. Select the `src/` directory.
 6. Open extension settings and configure your own AI provider credentials.
 
+### Tampermonkey: Messages workspace only, no AI
+
+If you only want the Etsy Messages layout/workflow improvements, install the standalone userscript instead of the full extension:
+
+[`userscripts/etsy-messages-workspace.user.js`](./userscripts/etsy-messages-workspace.user.js)
+
+It includes the full-height Messages layout, resizable side panels, local drafts, attachment gallery, and image preview without any AI-provider setup. See [`userscripts/README.md`](./userscripts/README.md) for installation and privacy details.
+
 ### Firefox development build
 
 On Windows, run:
@@ -148,12 +170,13 @@ See [BUILD_INSTRUCTIONS.md](./BUILD_INSTRUCTIONS.md) for more detail.
 src/
 ├── background/   background service worker and privileged operations
 ├── common/       shared browser helpers
-├── config/       assistant policy and base instructions
+├── config/       assistant policy and compatibility data
 ├── content/      Etsy integration, context, AI providers, UI and guards
 ├── libs/         vendored browser-side libraries
 ├── offscreen/    Chromium offscreen parsing support
 └── options/      extension settings UI
 
+userscripts/      standalone no-AI Etsy Messages workspace for Tampermonkey
 tests/            automated tests and synthetic fixtures
 .github/          repository and release automation metadata
 ```
@@ -200,6 +223,8 @@ Before contributing:
 | --- | --- |
 | [CHANGELOG.md](./CHANGELOG.md) | Source-level release history |
 | [ARCHITECTURE.md](./ARCHITECTURE.md) | Components, data flow, trust boundaries |
+| [COMPATIBILITY.md](./COMPATIBILITY.md) | Etsy UI compatibility layer and degraded-mode behavior |
+| [userscripts/README.md](./userscripts/README.md) | Standalone Tampermonkey Messages workspace |
 | [BUILD_INSTRUCTIONS.md](./BUILD_INSTRUCTIONS.md) | Local Chrome/Edge/Firefox build process |
 | [PRIVACY_POLICY.md](./PRIVACY_POLICY.md) | Data collection, storage, and provider disclosure |
 | [SECURITY.md](./SECURITY.md) | Security reporting and credential guidance |
