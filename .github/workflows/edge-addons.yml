@@ -11,10 +11,22 @@ on:
         options:
           - "false"
           - "true"
-      notes:
-        description: Notes for certification
+      previous_store_version:
+        description: Version currently published in Edge (for cumulative certification notes)
         required: false
-        default: "Automated release from GitHub Actions."
+        default: ""
+      permission_justifications_confirmed:
+        description: Confirm Partner Center permission-justification fields were updated if new permissions are detected
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+      notes:
+        description: Additional reviewer notes (cumulative notes are generated automatically)
+        required: false
+        default: ""
   push:
     tags:
       - "v*"
@@ -26,6 +38,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Run Node regression tests
         shell: powershell
@@ -38,6 +52,53 @@ jobs:
             if ($LASTEXITCODE -ne 0) {
               throw "Test failed: $($test.Name)"
             }
+          }
+
+      - name: Generate cumulative Edge certification notes
+        id: cert_notes
+        if: ${{ startsWith(github.ref, 'refs/tags/v') || inputs.publish == 'true' }}
+        shell: powershell
+        env:
+          INPUT_PREVIOUS_STORE_VERSION: ${{ inputs.previous_store_version }}
+          FALLBACK_PREVIOUS_STORE_VERSION: ${{ vars.EDGE_PREVIOUS_STORE_VERSION }}
+          ADDITIONAL_NOTES: ${{ inputs.notes }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $previousVersion = $env:INPUT_PREVIOUS_STORE_VERSION
+          if (-not $previousVersion) {
+            $previousVersion = $env:FALLBACK_PREVIOUS_STORE_VERSION
+          }
+          if (-not $previousVersion) {
+            throw "Publishing requires previous_store_version (or repository variable EDGE_PREVIOUS_STORE_VERSION) so certification notes cover every change since the version actually published in Edge."
+          }
+
+          $notesPath = Join-Path $env:RUNNER_TEMP "edge-certification-notes.txt"
+          & .\scripts\generate-edge-certification-notes.ps1 `
+            -PreviousStoreVersion $previousVersion `
+            -OutputPath $notesPath `
+            -AdditionalNotes $env:ADDITIONAL_NOTES
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to generate Edge certification notes."
+          }
+
+          "notes_path=$notesPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "previous_store_version=$previousVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "## Edge certification notes"
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value '```text'
+          Get-Content $notesPath | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value '```'
+
+      - name: Require Partner Center permission-justification confirmation
+        if: ${{ (startsWith(github.ref, 'refs/tags/v') || inputs.publish == 'true') && steps.cert_notes.outputs.has_permission_additions == 'true' }}
+        shell: powershell
+        env:
+          JUSTIFICATIONS_CONFIRMED: ${{ inputs.permission_justifications_confirmed }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          if ($env:JUSTIFICATIONS_CONFIRMED -ne "true") {
+            throw "New manifest permissions/hosts were detected. Before publishing, update the formal Permission justification fields in Microsoft Partner Center from .github/edge-permission-justifications.json, then re-run with permission_justifications_confirmed=true. The Edge submission API cannot update those formal fields."
           }
 
       - name: Build Chromium package
@@ -54,6 +115,13 @@ jobs:
         with:
           name: etsy-ai-assistant-edge
           path: etsy-ai-assistant-edge.zip
+
+      - name: Upload certification notes artifact
+        if: ${{ startsWith(github.ref, 'refs/tags/v') || inputs.publish == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: edge-certification-notes
+          path: ${{ runner.temp }}/edge-certification-notes.txt
 
       - name: Upload package to Edge Add-ons
         id: edge_upload
@@ -129,10 +197,18 @@ jobs:
           EDGE_PRODUCT_ID: ${{ secrets.EDGE_PRODUCT_ID }}
           EDGE_CLIENT_ID: ${{ secrets.EDGE_CLIENT_ID }}
           EDGE_API_KEY: ${{ secrets.EDGE_API_KEY }}
-          EDGE_NOTES: ${{ inputs.notes }}
+          EDGE_NOTES_PATH: ${{ steps.cert_notes.outputs.notes_path }}
         run: |
           $ErrorActionPreference = "Stop"
-          $notes = if ($env:EDGE_NOTES) { $env:EDGE_NOTES } else { "Automated release from GitHub Actions." }
+          if (-not $env:EDGE_NOTES_PATH -or -not (Test-Path $env:EDGE_NOTES_PATH)) {
+            throw "Certification notes were not generated. Refusing to publish."
+          }
+
+          $notes = Get-Content $env:EDGE_NOTES_PATH -Raw
+          if ([string]::IsNullOrWhiteSpace($notes) -or $notes.Length -lt 200) {
+            throw "Certification notes are unexpectedly short. Refusing to publish a low-information submission."
+          }
+
           $bodyPath = Join-Path $env:RUNNER_TEMP "edge-publish-notes.json"
           @{ notes = $notes } | ConvertTo-Json | Out-File -FilePath $bodyPath -Encoding utf8
           $publishUri = "https://api.addons.microsoftedge.microsoft.com/v1/products/$env:EDGE_PRODUCT_ID/submissions"
