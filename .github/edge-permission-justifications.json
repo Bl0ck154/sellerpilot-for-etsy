@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "scripting": "Used to inject SellerPilot functionality into Etsy pages where the extension runs. Injection is limited to the extension's declared Etsy host scope and user-initiated extension features.",
+    "activeTab": "Used for actions that operate on the Etsy tab the seller is currently using, so SellerPilot can inspect or refresh the active page context when requested.",
+    "tabs": "Used to identify and refresh open Etsy tabs after extension updates and to keep tab-specific conversation/page context isolated correctly across multiple Etsy tabs.",
+    "storage": "Used to store extension settings, scoped Etsy conversation state, seller-defined memory, quick replies, cached listing/context metadata, diagnostics, and related local extension state.",
+    "unlimitedStorage": "Used because long Etsy conversation histories, scoped context caches, listing metadata, and image-analysis metadata can exceed the normal extension storage quota for active sellers. This permission only increases local extension storage capacity and does not itself grant network access or transmit data.",
+    "downloads": "Used only when the seller explicitly asks SellerPilot to save generated/exported content or files through the browser download mechanism.",
+    "alarms": "Used for lightweight scheduled maintenance of extension state, such as cache/background housekeeping, without requiring the Etsy page to remain active.",
+    "offscreen": "Used by Chromium builds for background/offscreen processing that cannot run reliably in the service worker alone. It is not used to display hidden advertising or unrelated content."
+  },
+  "host_permissions": {
+    "https://www.etsy.com/*": "Required because SellerPilot is an Etsy seller assistant and must read the current Etsy page/conversation context and inject its UI on Etsy pages.",
+    "https://generativelanguage.googleapis.com/*": "Required to send seller-initiated AI requests to configured Google Gemini models and receive their responses.",
+    "https://openrouter.ai/*": "Required only when the seller selects/configures an OpenRouter-backed AI provider for an AI request.",
+    "https://raw.githubusercontent.com/Bl0ck154/sellerpilot-for-etsy/*": "Used to retrieve the extension's remote compatibility configuration from the canonical public SellerPilot repository so Etsy selector/layout compatibility can be adjusted safely without unrelated remote code execution."
+  },
+  "optional_host_permissions": {
+    "https://*/*": "Optional permission requested only for user-configured custom OpenAI-compatible HTTPS endpoints; it is not required for the default Etsy/Gemini workflow.",
+    "http://localhost/*": "Optional permission for seller-configured local development or self-hosted AI endpoints running on localhost.",
+    "http://127.0.0.1/*": "Optional permission for seller-configured local development or self-hosted AI endpoints addressed through 127.0.0.1."
+  }
+}
