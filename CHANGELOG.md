@@ -13,7 +13,15 @@ Store publication can lag behind the repository, so a version listed here does n
 - Added structured GitHub bug-report and feature-request forms.
 - Added a pull-request template with privacy, security, and release-safety checks.
 
-## 1.6.29 — current source
+## 1.6.30 — current source
+
+### Permission cleanup
+
+- Removed the unused `scripting` permission; Etsy page integration is already provided by declared content scripts and host permissions, and the source contains no `chrome.scripting`, `executeScript`, or dynamic CSS-injection calls.
+- Removed the unused `activeTab` permission; Etsy access is already declared explicitly and tab management uses the separate `tabs` permission.
+- Added regression assertions so these unnecessary permissions are not accidentally reintroduced.
+
+## 1.6.29
 
 ### Gemini streaming reliability
 

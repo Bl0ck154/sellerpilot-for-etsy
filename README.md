@@ -4,7 +4,7 @@
 
 ### A context-aware AI browser assistant and better Messages workspace for Etsy sellers
 
-[![Version](https://img.shields.io/badge/version-1.6.29-2f80ed)](#)
+[![Version](https://img.shields.io/badge/version-1.6.30-2f80ed)](#)
 [![Manifest](https://img.shields.io/badge/Manifest-V3-4285F4)](#)
 [![Browsers](https://img.shields.io/badge/Chrome%20%7C%20Edge%20%7C%20Firefox-supported-4c1)](#)
 [![License](https://img.shields.io/badge/license-MIT-green)](./LICENSE)

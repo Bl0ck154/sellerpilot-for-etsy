@@ -125,7 +125,7 @@ if ($releaseSections.Count -eq 0) {
 }
 
 $lines = New-Object System.Collections.Generic.List[string]
-$lines.Add("SellerPilot for Etsy $($currentManifest.version) - cumulative Edge certification notes")
+$lines.Add("Etsy AI Assistant $($currentManifest.version) - cumulative Edge certification notes")
 $lines.Add("Previous Edge store version: $PreviousStoreVersion")
 $lines.Add("Submitted version: $($currentManifest.version)")
 $lines.Add("")
@@ -161,7 +161,7 @@ if ($removedPermissions.Count -gt 0) {
 $lines.Add("")
 $lines.Add("Reviewer/privacy note:")
 $lines.Add("- Permission justifications are maintained in .github/edge-permission-justifications.json and are validated against the shipping manifest before publication.")
-$lines.Add("- Any AI-provider network request is triggered by SellerPilot functionality and uses only the provider/endpoint selected or configured for that workflow; unlimitedStorage only increases local extension storage quota and does not itself grant network access.")
+$lines.Add("- Any AI-provider network request is triggered by extension functionality and uses only the provider/endpoint selected or configured for that workflow; unlimitedStorage only increases local extension storage quota and does not itself grant network access.")
 
 if (-not [string]::IsNullOrWhiteSpace($AdditionalNotes)) {
     $lines.Add("")
