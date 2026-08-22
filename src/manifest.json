@@ -1,7 +1,7 @@
 {
     "manifest_version": 3,
     "name": "Etsy AI Assistant",
-    "version": "1.6.27",
+    "version": "1.6.28",
     "description": "AI assistant integrated into Etsy pages",
     "permissions": [
         "scripting",
@@ -17,7 +17,7 @@
         "https://www.etsy.com/*",
         "https://generativelanguage.googleapis.com/*",
         "https://openrouter.ai/*",
-        "https://raw.githubusercontent.com/Bl0ck154/ChromeExtensionEtsyAI/*"
+        "https://raw.githubusercontent.com/Bl0ck154/sellerpilot-for-etsy/*"
     ],
     "optional_host_permissions": [
         "https://*/*",

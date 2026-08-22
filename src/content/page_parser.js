@@ -18,7 +18,12 @@ function extractPageContent() {
             '[role="navigation"]', '[role="banner"]', '[role="contentinfo"]', // ARIA ролі
             '#global-nav', '.wt-overlay',           // Специфічне для Etsy
             '[class*="cookie"]', '#gdpr-banner',    // Кукіси
-            '[aria-label="Privacy settings"]'      // Ще кукіси
+            '[aria-label="Privacy settings"]',     // Ще кукіси
+            // Extension UI must never become page context. On Etsy layouts without
+            // <main>, the parser falls back to <body>, which otherwise includes our
+            // own old assistant messages and can make them look like current Etsy data.
+            '#etsy-ai-chat-container', '#etsy-ai-toggle-btn', '#etsy-ai-tooltip',
+            '#etsy-image-modal', '#etsy-ai-attachments-viewer', '#etsy-ai-quick-replies', '.etsy-ai-quick-reply-flyer'
         ];
 
         trashSelectors.forEach(selector => {

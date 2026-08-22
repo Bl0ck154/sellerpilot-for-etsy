@@ -8,8 +8,8 @@ const manifest = JSON.parse(read('src/manifest.json'));
 const scripts = manifest.content_scripts?.[0]?.js || [];
 const index = name => scripts.indexOf(name);
 
-assert.equal(manifest.version, '1.6.27');
-assert.match(read('build.bat'), /set\s+VERSION\s*=\s*1\.6\.27/);
+assert.equal(manifest.version, '1.6.28');
+assert.match(read('build.bat'), /set\s+VERSION\s*=\s*1\.6\.28/);
 assert.ok(manifest.permissions.includes('unlimitedStorage'));
 
 for (const required of [
@@ -50,6 +50,35 @@ assert.match(bridge, /getChatHistoryContext/);
 assert.match(bridge, /getRAGContext/);
 assert.match(bridge, /ScopedConversationStore/);
 assert.match(bridge, /waitForHistory/);
+assert.match(bridge, /VISIBLE_CONVERSATION_TAIL/);
+assert.match(bridge, /extractDomConversation/);
+
+const pageParser = read('src/content/page_parser.js');
+assert.match(pageParser, /#etsy-ai-chat-container/);
+assert.match(pageParser, /#etsy-ai-attachments-viewer/);
+assert.match(pageParser, /#etsy-ai-quick-replies/);
+
+const chatCss = read('src/content/chat_ui.css');
+assert.match(chatCss, /#etsy-ai-chat-container \.etsy-ai-msg/);
+assert.match(chatCss, /flex:\s*0 0 auto !important/);
+assert.match(chatCss, /height:\s*auto !important/);
+assert.match(chatCss, /#etsy-ai-chat-container \.etsy-ai-msg\.user/);
+assert.match(chatCss, /width:\s*fit-content !important/);
+
+const chatUi = read('src/content/chat_ui.js');
+assert.match(chatUi, /activeAiScopeKey = getLiveLocationScopeKey\(\)/);
+assert.match(chatUi, /function contextBelongsToLiveTab\(/);
+assert.match(chatUi, /if \(contextBelongsToLiveTab\(nextContext\)\)/);
+
+const shopIntel = read('src/content/shop_intelligence_manager.js');
+assert.match(shopIntel, /function contextMatchesLivePage\(/);
+assert.match(shopIntel, /function getLiveScopedConversationState\(/);
+assert.match(shopIntel, /ScopedConversationStore\.getHistory/);
+
+const background = read('src/background/service_worker.js');
+assert.match(background, /ETSY_TAB_RELOAD_AFTER_UPDATE_KEY/);
+assert.match(background, /reloadOpenEtsyTabs/);
+assert.match(background, /chrome\.tabs\.reload/);
 
 const injector = read('src/content/inject_interceptor.js');
 assert.match(injector, /function\s+maybeInject\s*\(/);

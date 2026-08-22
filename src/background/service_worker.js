@@ -1,3 +1,33 @@
+// Reload open Etsy tabs after an extension runtime update so old content scripts
+// are not left in the browser with an invalidated chrome.runtime context.
+const ETSY_TAB_RELOAD_AFTER_UPDATE_KEY = 'etsy_ai_reload_tabs_after_extension_update';
+
+async function reloadOpenEtsyTabs() {
+    const tabs = await chrome.tabs.query({ url: 'https://www.etsy.com/*' });
+    await Promise.allSettled(tabs
+        .filter(tab => Number.isInteger(tab.id))
+        .map(tab => chrome.tabs.reload(tab.id)));
+}
+
+async function resumePendingEtsyTabReload() {
+    try {
+        const state = await chrome.storage.local.get([ETSY_TAB_RELOAD_AFTER_UPDATE_KEY]);
+        if (!state[ETSY_TAB_RELOAD_AFTER_UPDATE_KEY]) return;
+        await chrome.storage.local.remove([ETSY_TAB_RELOAD_AFTER_UPDATE_KEY]);
+        await reloadOpenEtsyTabs();
+    } catch (error) {
+        console.warn('Could not reload Etsy tabs after extension update:', error);
+    }
+}
+
+chrome.runtime.onInstalled.addListener((details) => {
+    if (details.reason === 'update') {
+        reloadOpenEtsyTabs().catch(error => console.warn('Could not refresh Etsy tabs after update:', error));
+    }
+});
+
+resumePendingEtsyTabReload();
+
 // ============================================
 // Автоматична перевірка оновлень маніфесту
 // ============================================
@@ -56,6 +86,10 @@ async function checkForManifestUpdate() {
 
             if (chatClosed) {
                 console.log("✅ Вікно чату закрите. Перезавантажую розширення...");
+                // The new service worker consumes this flag and reloads Etsy tabs.
+                // Without that second step, already-open pages keep dead content scripts
+                // until the user presses F5 manually.
+                await chrome.storage.local.set({ [ETSY_TAB_RELOAD_AFTER_UPDATE_KEY]: Date.now() });
                 chrome.runtime.reload();
             } else {
                 console.log("⏸️ Оновлення знайдено, але вікно чату відкрите. Очікую закриття...");

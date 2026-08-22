@@ -13,7 +13,19 @@ Store publication can lag behind the repository, so a version listed here does n
 - Added structured GitHub bug-report and feature-request forms.
 - Added a pull-request template with privacy, security, and release-safety checks.
 
-## 1.6.27 — current source
+## 1.6.28 — current source
+
+### Etsy Messages reliability
+
+- Reload open Etsy tabs automatically after an extension runtime update so already-open pages do not keep invalidated content scripts until a manual refresh.
+- Prevent SellerPilot's own floating chat UI from being parsed back into Etsy page context.
+- Migrate legacy conversation history into scoped storage and include an unseen live DOM tail when structured history lags behind the visible Etsy thread.
+- Keep the live tab URL authoritative when restoring or receiving the legacy global `current_context`, so another open Etsy tab cannot switch the assistant to the wrong conversation or page context.
+- Make shop-intelligence reads prefer live-tab page data plus scoped conversation/listing state instead of cross-tab legacy mirrors.
+- Harden assistant message-bubble sizing against host-page CSS collisions that could stretch a short user message over the full chat height.
+- Point the remote compatibility configuration at the canonical `sellerpilot-for-etsy` repository.
+
+## 1.6.27
 
 ### Reliability and compatibility
 

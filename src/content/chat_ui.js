@@ -538,6 +538,11 @@ Prefer unclear when unsure.`;
             return; // Don't initialize anything
         }
 
+        // The live tab URL is authoritative. `current_context` is a legacy global
+        // storage mirror shared by every Etsy tab, so never let another tab decide
+        // which assistant history this page opens during startup.
+        activeAiScopeKey = getLiveLocationScopeKey();
+
         await handleBrowserRestart(); // Auto-save previous chat if exists
         await loadConfiguration();
         window.ShopIntelligenceManager?.maybeBootstrap('startup');
@@ -547,7 +552,7 @@ Prefer unclear when unsure.`;
 
         // Request context from current page
         chrome.storage.local.get(['current_context'], (result) => {
-            if (result.current_context) {
+            if (contextBelongsToLiveTab(result.current_context)) {
                 updateContext(result.current_context);
             }
         });
@@ -810,8 +815,11 @@ Prefer unclear when unsure.`;
 
         chrome.storage.onChanged.addListener((changes, namespace) => {
             if (namespace === 'local' && changes.current_context) {
-                updateContext(changes.current_context.newValue);
-                window.ShopIntelligenceManager?.maybeBootstrap('context_changed');
+                const nextContext = changes.current_context.newValue;
+                if (contextBelongsToLiveTab(nextContext)) {
+                    updateContext(nextContext);
+                    window.ShopIntelligenceManager?.maybeBootstrap('context_changed');
+                }
             }
             if (namespace === 'local' && changes.custom_instructions) {
                 updateCustomInstructionsWarning(changes.custom_instructions.newValue);
@@ -2126,6 +2134,19 @@ Prefer unclear when unsure.`;
         return `other:${path || '/'}`;
     }
 
+    function getLiveLocationScopeKey() {
+        return getContextScopeKey({
+            page_url: location.href,
+            metadata: { url: location.href }
+        });
+    }
+
+    function contextBelongsToLiveTab(context) {
+        const contextUrl = context?.metadata?.url || context?.page_url || '';
+        if (!contextUrl) return false;
+        return getContextScopeKey(context) === getLiveLocationScopeKey();
+    }
+
     function classifyAiError(errorText = '') {
         const text = String(errorText || 'Unknown error');
         const lower = text.toLowerCase();
@@ -2385,7 +2406,7 @@ Prefer unclear when unsure.`;
                 }
             }, 100);
         }
-        if (result.current_context) {
+        if (contextBelongsToLiveTab(result.current_context)) {
             updateContext(result.current_context);
         }
     }

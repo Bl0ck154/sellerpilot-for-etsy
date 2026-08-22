@@ -17,6 +17,24 @@
             if(full>this.LIMITS.etsyChatTotalChars){const begin=Math.floor(this.LIMITS.etsyChatTotalChars*.35),recent=this.LIMITS.etsyChatTotalChars-begin,selected=new Set();let used=0;for(let i=0;i<candidates.length;i++){if(selected.size&&used+sizes[i]>begin)break;selected.add(i);used+=sizes[i];}used=0;for(let i=candidates.length-1;i>=0;i--){if(selected.has(i))continue;if(used&&used+sizes[i]>recent)break;selected.add(i);used+=sizes[i];}indexes=[...selected].sort((a,b)=>a-b);}
             const omittedCount=candidates.length-indexes.length;if(omittedCount>0){context+=`[${omittedCount} middle message(s) omitted because the conversation exceeded the safety budget; beginning and newest messages are included.]\n\n`;if(window.ConversationContextManager){const selected=new Set(indexes),omitted=candidates.map((message,sourceIndex)=>({message,sourceIndex})).filter(item=>!selected.has(item.sourceIndex)),summary=await window.ConversationContextManager.getOrCreateSummary(history,omitted);context+=window.ConversationContextManager.buildContextSection(summary,omittedCount);}}
             for(const index of indexes){const m=candidates[index],senderId=String(m.sender_user_id||m.sender_id||m.user_id||'').trim(),customerId=String(history.customer_user_id||'').trim(),roleText=`${m.sender_type||''} ${m.role||''} ${m.author_role||''}`.toLowerCase(),role=customerId&&senderId?(customerId===senderId?'CUSTOMER':'OWNER'):/buyer|customer/.test(roleText)?'CUSTOMER':/seller|shop|owner|merchant/.test(roleText)?'OWNER':'PARTICIPANT',sender=m.sender_display_name||`User ${senderId||'unknown'}`,text=this.trimText(m.message_body||m.message||m.body||m.text||'',this.LIMITS.etsyChatMessageChars),n=Number(m.create_date),date=Number.isFinite(n)&&n>0?new Date(n<10_000_000_000?n*1000:n).toLocaleString():'';context+=`[${role}: ${sender}]${date?` (${date})`:''}: ${text}\n`;const attachments=Array.isArray(m.attachments)?m.attachments.length:Array.isArray(m.images)?m.images.length:(m.has_images?1:0);if(attachments)context+=`  📎 ${attachments} attachment(s)\n`;}
+            // A previously hydrated scoped history can survive for days if Etsy changes
+            // or skips the network endpoint we intercept. Compare it with the messages
+            // visibly rendered right now and expose only unseen live tail text.
+            // Speaker roles are deliberately left unknown rather than guessed.
+            const domFallback=window.EtsyAdapter?.extractDomConversation?.(convoId);
+            if(domFallback?.messages?.length){
+                const structuredTexts=new Set(candidates.map(m=>String(m.message_body||m.message||m.body||m.text||'').replace(/\s+/g,' ').trim()).filter(Boolean));
+                const unseen=[];
+                for(const m of domFallback.messages){
+                    const text=String(m.message_body||m.message||m.body||m.text||'').replace(/\s+/g,' ').trim();
+                    if(!text||structuredTexts.has(text)||unseen.includes(text))continue;
+                    unseen.push(text);
+                }
+                if(unseen.length){
+                    context+=`\n[VISIBLE_CONVERSATION_TAIL — live Etsy DOM; speaker roles unknown; prefer this for recency when it conflicts with older structured history:]\n`;
+                    for(const text of unseen.slice(-8))context+=`[VISIBLE PARTICIPANT]: ${this.trimText(text,this.LIMITS.etsyChatMessageChars)}\n`;
+                }
+            }
             const domImages=document.querySelectorAll('.quick-refunds-message-images a[href], .quick-refunds-message-images img[src]').length;if(domImages)context+=`\n[VISIBLE_CONVERSATION_ATTACHMENTS: ${domImages} image element(s) visible. Speaker/message association may be incomplete; use structured history and Vision summaries when available.]\n`;return context;
         }catch(error){console.warn('ScopedContextBridge: conversation context failed',error);return'';}
     };

@@ -4,7 +4,7 @@
 
     const CONFIG_SCHEMA_VERSION = 1;
     const CONFIG_PATH = 'config/etsy_compatibility.json';
-    const REMOTE_CONFIG_URL = 'https://raw.githubusercontent.com/Bl0ck154/ChromeExtensionEtsyAI/main/src/config/etsy_compatibility.json';
+    const REMOTE_CONFIG_URL = 'https://raw.githubusercontent.com/Bl0ck154/sellerpilot-for-etsy/main/src/config/etsy_compatibility.json';
     const CONFIG_CACHE_KEY = 'ETSY_COMPATIBILITY_CONFIG_CACHE';
     const DIAGNOSTICS_KEY = 'ETSY_COMPATIBILITY_DIAGNOSTICS';
     const FALLBACK_HISTORY_SOURCE_PREFIX = 'compatibility-';
@@ -445,23 +445,38 @@
         const conversationId = getConversationId();
         if (!conversationId || !chrome.runtime?.id) return { source: 'none', updated: false };
 
+        const scopedStore = window.ScopedConversationStore;
         const state = await storageGet(['ETSY_CHAT_HISTORY']);
-        const existing = state.ETSY_CHAT_HISTORY;
+        const legacyExisting = state.ETSY_CHAT_HISTORY;
+        const scopedExisting = scopedStore?.getHistory ? await scopedStore.getHistory(conversationId) : null;
+        const existing = scopedExisting || legacyExisting;
+
+        const embedded = extractEmbeddedConversation(conversationId);
+        const domFallback = extractDomConversation(conversationId);
+        const fallback = embedded || domFallback;
+
+        // Healthy structured data remains authoritative. If it only exists in the
+        // pre-scoped legacy mirror, migrate it once into the canonical conversation store.
+        // Fresh visible DOM text is merged into the AI prompt separately and must not
+        // replace richer structured history with role-less fallback rows.
         if (existing?.messages?.length && normalizeId(existing.convo_id) === conversationId && !isFallbackHistory(existing)) {
+            if (!scopedExisting && scopedStore?.setHistory) {
+                await scopedStore.setHistory(existing);
+                return { source: 'primary', updated: true };
+            }
             return { source: 'primary', updated: false };
         }
 
-        const embedded = extractEmbeddedConversation(conversationId);
-        const fallback = embedded || extractDomConversation(conversationId);
         if (!fallback) return { source: 'unavailable', updated: false };
 
         const existingMessageCount = Array.isArray(existing?.messages) ? existing.messages.length : 0;
         const candidateMessageCount = fallback.messages.length;
         const sameConversation = normalizeId(existing?.convo_id) === conversationId;
-        const shouldWrite = !sameConversation || !existingMessageCount || (isFallbackHistory(existing) && candidateMessageCount >= existingMessageCount);
+        const shouldWrite = !sameConversation || !existingMessageCount || candidateMessageCount > existingMessageCount || (isFallbackHistory(existing) && candidateMessageCount >= existingMessageCount);
         if (!shouldWrite) return { source: existing?.source || 'existing', updated: false };
 
-        await storageSet({ ETSY_CHAT_HISTORY: fallback });
+        if (scopedStore?.setHistory) await scopedStore.setHistory(fallback);
+        else await storageSet({ ETSY_CHAT_HISTORY: fallback });
         return { source: fallback.source, updated: true };
     }
 

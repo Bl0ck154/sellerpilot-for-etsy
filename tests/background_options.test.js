@@ -12,6 +12,8 @@ let availableTabs = [];
 let queryError = null;
 let connectListener = null;
 let customSettings = {};
+let installListener = null;
+let reloadedTabs = [];
 let fetchImpl = async () => ({ json: async () => ({ version: 'test' }) });
 
 const chrome = {
@@ -24,6 +26,9 @@ const chrome = {
         getURL: value => `chrome-extension://test/${value}`,
         reload() { },
         openOptionsPage: async () => { optionsOpenCount += 1; },
+        onInstalled: {
+            addListener(listener) { installListener = listener; }
+        },
         onMessage: {
             addListener(listener) { messageListener = listener; }
         },
@@ -40,7 +45,8 @@ const chrome = {
         },
         sendMessage: async () => ({}),
         create: async options => { createdTab = options; },
-        update: async (tabId, options) => { updatedTab = { tabId, options }; }
+        update: async (tabId, options) => { updatedTab = { tabId, options }; },
+        reload: async tabId => { reloadedTabs.push(tabId); }
     },
     windows: {
         update: async (windowId, options) => { focusedWindow = { windowId, options }; }
@@ -82,6 +88,14 @@ vm.runInContext(
 
 (async () => {
     assert.equal(typeof messageListener, 'function', 'background message listener is registered');
+    assert.equal(typeof installListener, 'function', 'extension update listener is registered');
+
+    availableTabs = [{ id: 10, url: 'https://www.etsy.com/messages/100' }, { id: 11, url: 'https://www.etsy.com/your/shops/me/dashboard' }];
+    installListener({ reason: 'update' });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.deepEqual(reloadedTabs.sort(), [10, 11], 'open Etsy tabs are reloaded after an extension update');
+    availableTabs = [];
+    reloadedTabs = [];
 
     async function openOptions() {
         let response = null;

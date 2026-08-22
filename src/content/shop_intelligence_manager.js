@@ -82,6 +82,54 @@ window.ShopIntelligenceManager = (function () {
         return 'PARTICIPANT';
     }
 
+    function contextMatchesLivePage(context) {
+        const url = context?.metadata?.url || context?.page_url || context?.page_content?.metadata?.url || '';
+        if (!url) return false;
+        return getPageIdentity(url).pageKey === getPageIdentity(location.href).pageKey;
+    }
+
+    function buildLivePageContext() {
+        try {
+            const page = window.PageParser?.getFullPageData?.();
+            if (!page) return null;
+            return {
+                page_content: {
+                    title: page.title,
+                    markdown: page.markdown,
+                    excerpt: page.excerpt,
+                    siteName: page.siteName,
+                    hasContent: page.hasContent
+                },
+                metadata: page.metadata,
+                page_url: location.href
+            };
+        } catch (_) {
+            return null;
+        }
+    }
+
+    async function getLiveScopedConversationState(legacyHistory, legacyListingId) {
+        const page = getPageIdentity(location.href);
+        if (!page.conversationId || !window.ScopedConversationStore) {
+            return { history: legacyHistory || null, listingId: legacyListingId || null };
+        }
+
+        const [scopedHistory, scopedListing] = await Promise.all([
+            window.ScopedConversationStore.getHistory(page.conversationId),
+            window.ScopedConversationStore.getListing(page.conversationId)
+        ]);
+        const legacyHistoryMatchesLive = String(legacyHistory?.convo_id || '').trim() === page.conversationId
+            ? legacyHistory
+            : null;
+        return {
+            history: scopedHistory || legacyHistoryMatchesLive,
+            // getListing() already performs a guarded legacy migration when the
+            // legacy listing scope matches this conversation. If it returned null,
+            // using the unscoped mirror here could attach another tab's listing.
+            listingId: scopedListing?.listingId || null
+        };
+    }
+
     function deriveSourceScope(metadata, chatHistory, storedListingId) {
         // The live tab URL is the authoritative scope guard. Stored page context can
         // briefly lag behind SPA navigation and must not reopen the previous customer.
@@ -178,10 +226,16 @@ window.ShopIntelligenceManager = (function () {
             'ETSY_CHAT_HISTORY',
             'ETSY_CURRENT_LISTING_ID'
         ]);
-        const currentContext = state.current_context || {};
+        const currentContext = contextMatchesLivePage(state.current_context)
+            ? state.current_context
+            : (buildLivePageContext() || {});
         const pageContent = currentContext.page_content || currentContext || {};
         const metadata = currentContext.metadata || pageContent.metadata || {};
-        return deriveSourceScope(metadata, state.ETSY_CHAT_HISTORY || null, state.ETSY_CURRENT_LISTING_ID);
+        const liveState = await getLiveScopedConversationState(
+            state.ETSY_CHAT_HISTORY || null,
+            state.ETSY_CURRENT_LISTING_ID
+        );
+        return deriveSourceScope(metadata, liveState.history, liveState.listingId);
     }
 
     async function collectSnapshot() {
@@ -194,11 +248,17 @@ window.ShopIntelligenceManager = (function () {
             'gemini_api_key'
         ]);
 
-        const currentContext = base.current_context || {};
+        const currentContext = contextMatchesLivePage(base.current_context)
+            ? base.current_context
+            : (buildLivePageContext() || {});
         const pageContent = currentContext.page_content || currentContext || {};
         const metadata = currentContext.metadata || pageContent.metadata || {};
-        const storedChatHistory = base.ETSY_CHAT_HISTORY || null;
-        const sourceScope = deriveSourceScope(metadata, storedChatHistory, base.ETSY_CURRENT_LISTING_ID);
+        const liveState = await getLiveScopedConversationState(
+            base.ETSY_CHAT_HISTORY || null,
+            base.ETSY_CURRENT_LISTING_ID
+        );
+        const storedChatHistory = liveState.history;
+        const sourceScope = deriveSourceScope(metadata, storedChatHistory, liveState.listingId);
         const chatHistory = sourceScope.conversationId ? storedChatHistory : null;
         const listingId = sourceScope.listingId;
         const ownerIds = new Set([
