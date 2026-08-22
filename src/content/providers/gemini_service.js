@@ -423,6 +423,19 @@ AI: ${aiResponse}`;
         throw lastError;
     }
 
+    _extractStreamText(data) {
+        const parts = data?.candidates?.[0]?.content?.parts;
+        if (!Array.isArray(parts)) return '';
+
+        // Gemini can emit a candidate with several parts in one SSE event. The first
+        // part may be thought metadata/signature while the first visible answer text is
+        // in a later part. Reading only parts[0] drops the beginning of the reply.
+        return parts
+            .filter(part => part && part.thought !== true && typeof part.text === 'string')
+            .map(part => part.text)
+            .join('');
+    }
+
     async _streamMessageInternal({ modelId, apiKey, messages, systemInstruction, onChunk, onComplete, onError, attempt = 0, timeoutMs = this.requestTimeoutMs, thinkingMode = null, abortSignal = null }) {
         const url = `${this.getApiEndpoint()}${modelId}:streamGenerateContent?alt=sse`;
 
@@ -468,33 +481,42 @@ AI: ${aiResponse}`;
             const reader = response.body.getReader();
             const decoder = new TextDecoder();
 
+            const consumeSseLine = (line) => {
+                const normalizedLine = String(line || '').trimStart();
+                if (!normalizedLine.startsWith('data:')) return;
+
+                const jsonStr = normalizedLine.substring(5).trim();
+                if (!jsonStr || jsonStr === '[DONE]') return;
+
+                try {
+                    const data = JSON.parse(jsonStr);
+                    const textPart = this._extractStreamText(data);
+
+                    if (textPart) {
+                        fullText += textPart;
+                        if (onChunk) onChunk(textPart, fullText);
+                    }
+                } catch (_) {
+                    // Ignore malformed complete SSE events without breaking the stream.
+                }
+            };
+
             while (true) {
                 const { done, value } = await reader.read();
                 if (done) break;
 
                 buffer += decoder.decode(value, { stream: true });
-                const lines = buffer.split('\n');
+                const lines = buffer.split(/\r?\n/);
 
                 buffer = lines.pop() || '';
+                for (const line of lines) consumeSseLine(line);
+            }
 
-                for (const line of lines) {
-                    if (line.startsWith('data: ')) {
-                        const jsonStr = line.substring(6).trim();
-                        if (jsonStr === '[DONE]') continue;
-
-                        try {
-                            const data = JSON.parse(jsonStr);
-                            const textPart = data.candidates?.[0]?.content?.parts?.[0]?.text;
-
-                            if (textPart) {
-                                fullText += textPart;
-                                if (onChunk) onChunk(textPart, fullText);
-                            }
-                        } catch (e) {
-                            // Skip incomplete chunks
-                        }
-                    }
-                }
+            // Flush any final decoder bytes and accept a valid final SSE event even
+            // when the server closes the stream without a trailing newline.
+            buffer += decoder.decode();
+            if (buffer) {
+                for (const line of buffer.split(/\r?\n/)) consumeSseLine(line);
             }
 
             if (!fullText.trim()) {

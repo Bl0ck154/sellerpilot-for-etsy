@@ -13,7 +13,15 @@ Store publication can lag behind the repository, so a version listed here does n
 - Added structured GitHub bug-report and feature-request forms.
 - Added a pull-request template with privacy, security, and release-safety checks.
 
-## 1.6.28 — current source
+## 1.6.29 — current source
+
+### Gemini streaming reliability
+
+- Preserve the beginning of AI replies when Gemini emits visible answer text in a later part of a multi-part streaming candidate.
+- Ignore `thought: true` streaming parts so hidden model reasoning is never mixed into the customer-facing answer.
+- Accept SSE `data:` frames with or without a following space and flush the final buffered event when a stream closes without a trailing newline.
+
+## 1.6.28
 
 ### Etsy Messages reliability
 
