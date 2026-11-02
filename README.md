@@ -17,6 +17,9 @@
 
 > **Project naming:** the public project/repository brand is **SellerPilot for Etsy**. The current browser-extension package name in `manifest.json` remains **Etsy AI Assistant** for compatibility with the existing extension/release identity.
 
+<p align="center"><img src="docs/seller-workflow.svg" alt="Concept diagram of conversation context, AI draft, and seller review before sending" width="100%" /></p>
+<p align="center"><sub>Illustrative diagram with synthetic UI elements. SellerPilot creates reply drafts; it does not send messages automatically.</sub></p>
+
 ## What it does
 
 SellerPilot improves Etsy seller workflows in two ways: it adds a context-aware AI assistant directly to Etsy, and it turns the cramped Etsy Messages page into a much more practical full-height workspace. Instead of leaving most of the screen to static navigation, order chrome, blank space, and the footer, the enhanced layout lets the conversation use the available space and keeps the surrounding panels resizable.
