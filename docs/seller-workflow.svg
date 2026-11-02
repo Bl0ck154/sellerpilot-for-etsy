@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="420" viewBox="0 0 1100 420" role="img" aria-label="SellerPilot conceptual workflow: Etsy conversation context, local AI drafting, seller review before sending">
+<defs>
+<linearGradient id="bg" x1="0" x2="1" y1="0" y2="1"><stop stop-color="#101A30"/><stop offset="1" stop-color="#1B2E4A"/></linearGradient>
+</defs>
+<rect width="1100" height="420" rx="23" fill="url(#bg)"/>
+<path d="M0 406H1100" stroke="#73E1D1" stroke-width="9"/>
+<text x="45" y="61" font-size="33" fill="#F5F8FF" font-family="Arial,Helvetica,sans-serif" font-weight="700">SellerPilot for Etsy</text>
+<text x="45" y="98" font-size="18" fill="#AFC6DC" font-family="Arial,Helvetica,sans-serif">Context-aware assistance for a seller-controlled reply workflow</text>
+<g font-family="Arial,Helvetica,sans-serif">
+<g>
+<rect x="45" y="144" width="286" height="214" rx="19" fill="#24334C" stroke="#48617B" stroke-width="2"/>
+<text x="70" y="182" font-size="16" font-weight="700" fill="#87DAF4">01 · CONTEXT</text>
+<rect x="69" y="204" width="237" height="37" rx="8" fill="#344C64"/>
+<circle cx="91" cy="222" r="7" fill="#74CBE4"/><rect x="110" y="217" width="148" height="10" rx="5" fill="#C7DCEC"/>
+<rect x="69" y="256" width="193" height="11" rx="5" fill="#91AFC8"/>
+<rect x="69" y="277" width="229" height="9" rx="4.5" fill="#5B7894"/>
+<rect x="69" y="297" width="171" height="9" rx="4.5" fill="#5B7894"/>
+<text x="70" y="335" font-size="15" fill="#C3D7E9">Current Etsy conversation</text>
+</g>
+<path d="M343 244h46m-14-13 14 13-14 13" stroke="#76DECB" stroke-width="6" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<g>
+<rect x="400" y="144" width="286" height="214" rx="19" fill="#24334C" stroke="#547D80" stroke-width="2"/>
+<text x="425" y="182" font-size="16" font-weight="700" fill="#8AE6D3">02 · DRAFT</text>
+<rect x="425" y="207" width="236" height="119" rx="12" fill="#20484C"/>
+<path d="M446 237h173m-173 20h193m-193 20h151" stroke="#C8E7EA" stroke-width="9" stroke-linecap="round"/>
+<rect x="427" y="305" width="130" height="24" rx="12" fill="#30645E"/>
+<text x="440" y="322" font-size="13" fill="#CCFFED">Draft only</text>
+</g>
+<path d="M698 244h46m-14-13 14 13-14 13" stroke="#76DECB" stroke-width="6" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<g>
+<rect x="755" y="144" width="300" height="214" rx="19" fill="#24334C" stroke="#547D80" stroke-width="2"/>
+<text x="780" y="182" font-size="16" font-weight="700" fill="#8AE6D3">03 · SELLER CONTROL</text>
+<rect x="779" y="208" width="251" height="60" rx="11" fill="#2F4A56"/>
+<path d="m804 237 14 14 29-30" stroke="#79EAB2" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+<text x="863" y="246" font-size="19" fill="#EDF9F6" font-weight="700">Review &amp; edit</text>
+<text x="782" y="304" font-size="15" fill="#C1D9E4">Nothing is sent automatically</text>
+<text x="782" y="333" font-size="15" fill="#87CBBF">You decide what to send</text>
+</g>
+</g>
+<text x="1052" y="393" font-size="13" font-family="Arial,Helvetica,sans-serif" fill="#93B0C3" text-anchor="end">Concept diagram · not a captured customer conversation</text>
+</svg>
